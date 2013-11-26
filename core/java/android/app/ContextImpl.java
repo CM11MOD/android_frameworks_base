@@ -1917,10 +1917,16 @@ class ContextImpl extends Context {
     @Override
     public Context createPackageContextAsUser(String packageName, int flags, UserHandle user)
             throws NameNotFoundException {
+        return createPackageContextAsUser(packageName, null, flags, user);
+    }
+
+    @Override
+    public Context createPackageContextAsUser(String packageName, String themePackageName,
+            int flags, UserHandle user) throws NameNotFoundException {
         final boolean restricted = (flags & CONTEXT_RESTRICTED) == CONTEXT_RESTRICTED;
         if (packageName.equals("system") || packageName.equals("android")) {
             return new ContextImpl(this, mMainThread, mPackageInfo, mActivityToken,
-                    user, restricted, mDisplay, mOverrideConfiguration);
+                    user, restricted, mDisplay, mOverrideConfiguration, themePackageName);
         }
 
         LoadedApk pi = mMainThread.getPackageInfo(packageName, mResources.getCompatibilityInfo(),
@@ -2057,9 +2063,8 @@ class ContextImpl extends Context {
                     || overrideConfiguration != null
                     || (compatInfo != null && compatInfo.applicationScale
                             != resources.getCompatibilityInfo().applicationScale)) {
-                resources = mResourcesManager.getTopLevelResources(
-                        packageInfo.getResDir(), displayId,
-                        overrideConfiguration, compatInfo, activityToken);
+                resources = mResourcesManager.getTopLevelResources(packageInfo.getResDir(), displayId,
+                        packageInfo.getPackageName(), themePackageName, compatInfo ,activityToken);
             }
         }
         mResources = resources;
