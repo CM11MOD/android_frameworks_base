@@ -616,12 +616,12 @@ class ContextImpl extends Context {
                 }});
 
         registerService(THEME_SERVICE, new ServiceFetcher() {
-                public Object createService(ContextImpl ctx) {
-                    IBinder b = ServiceManager.getService(THEME_SERVICE);
-                    IThemeService service = IThemeService.Stub.asInterface(b);
-                    return new ThemeManager(ctx.getOuterContext(),
-                            service);
-                }});
+            public Object createService(ContextImpl ctx) {
+                IBinder b = ServiceManager.getService(THEME_SERVICE);
+                IThemeService service = IThemeService.Stub.asInterface(b);
+                return new ThemeManager(ctx.getOuterContext(),
+                        service);
+            }});
     }
 
     static ContextImpl getImpl(Context context) {
