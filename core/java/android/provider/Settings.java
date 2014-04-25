@@ -55,7 +55,6 @@ import android.util.AndroidException;
 import android.util.Log;
 
 import com.android.internal.widget.ILockSettings;
-import com.android.internal.util.cm.LockscreenBackgroundUtil;
 
 import java.net.URISyntaxException;
 import java.util.HashMap;
@@ -3512,14 +3511,6 @@ public final class Settings {
          * @hide
          */
         public static final String QUIET_HOURS_DIM = "quiet_hours_dim";
-
-        /**
-         * Sets the lockscreen background style. Integer.
-         * @see LockscreenBackgroundUtil#LOCKSCREEN_STYLE_DEFAULT
-         * @see LockscreenBackgroundUtil#LOCKSCREEN_STYLE_IMAGE
-         * @hide
-         */
-        public static final String LOCKSCREEN_BACKGROUND_STYLE = "lockscreen_background_style";
 
         /**
          * Show the pending notification counts as overlays on the status bar
