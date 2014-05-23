@@ -385,7 +385,7 @@ public class NavigationBarView extends LinearLayout implements BaseStatusBar.Nav
         return mCurrentView.findViewById(R.id.show_notifs);
     }
 
-    public void updateResources() {
+    /*public void updateResources() {
         getIcons(mContext.getResources());
         for (int i = 0; i < mRotatedViews.length; i++) {
             ViewGroup container = (ViewGroup) mRotatedViews[i];
@@ -410,7 +410,7 @@ public class NavigationBarView extends LinearLayout implements BaseStatusBar.Nav
         if (kbv != null) {
             kbv.updateResources();
         }
-    }
+    }*/
 
     @Override
     public void setLayoutDirection(int layoutDirection) {
