@@ -607,14 +607,6 @@ public class ThemeService extends IThemeService.Stub {
         }
     }
 
-    private void sleepQuiet(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-
     private void postProgress(String pkgName) {
         int N = mClients.beginBroadcast();
         for(int i=0; i < N; i++) {
@@ -754,3 +746,4 @@ public class ThemeService extends IThemeService.Stub {
         }
     };
 }
+
