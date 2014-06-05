@@ -185,7 +185,7 @@ public class KeyguardViewManager {
                 Settings.System.LOCKSCREEN_BACKGROUND_STYLE, 2, UserHandle.USER_CURRENT);
         mBackgroundColor = Settings.System.getIntForUser(mContext.getContentResolver(),
                 Settings.System.LOCKSCREEN_BACKGROUND_COLOR, 0x00000000, UserHandle.USER_CURRENT);
-        if (!mSeeThrough) mCustomBackground = null;
+        //if (!mSeeThrough) mCustomBackground = null;
         if (!mNotOverridden) mLockscreenNotifications = false;
         if (mLockscreenNotifications && mNotificationViewManager == null) {
             mNotificationViewManager = new NotificationViewManager(mContext, this);
