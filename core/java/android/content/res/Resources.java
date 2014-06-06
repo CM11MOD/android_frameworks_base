@@ -2091,7 +2091,7 @@ public class Resources {
 
     /** @hide */
     public final void updateStringCache() {
-        synchronized (mTmpValue) {
+        synchronized (mAccessLock) {
             mAssets.recreateStringBlocks();
         }
     }
