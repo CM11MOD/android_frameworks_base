@@ -184,7 +184,7 @@ public class KeyguardViewManager {
                 Settings.System.ACTIVE_NOTIFICATIONS, 0, UserHandle.USER_CURRENT) == 1;
         mLockscreenNotifications = Settings.System.getIntForUser(mContext.getContentResolver(),
                 Settings.System.LOCKSCREEN_NOTIFICATIONS, mLockscreenNotifications ? 1 : 0, UserHandle.USER_CURRENT) == 1;
-        //if (!mSeeThrough) mCustomBackground = null;
+        if (!mSeeThrough) mCustomBackground = null;
         if (!mNotOverridden) mLockscreenNotifications = false;
         if (mLockscreenNotifications && mNotificationViewManager == null) {
             mNotificationViewManager = new NotificationViewManager(mContext, this);
