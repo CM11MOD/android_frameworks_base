@@ -114,7 +114,7 @@ public class KeyguardViewManager {
     private ViewManagerHost mKeyguardHost;
     private WindowManager.LayoutParams mWindowLayoutParams;
 
-    private boolean mLockscreenNotifications = false;
+    private boolean mLockscreenNotifications = true;
     private boolean mIsCoverflow = true;
     private boolean mNeedsInput = false;
     private boolean mScreenOn = false;
