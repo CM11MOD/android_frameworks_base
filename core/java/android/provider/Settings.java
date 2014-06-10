@@ -8877,6 +8877,12 @@ public final class Settings {
         public static final String SMS_SHORT_CODE_RULE = "sms_short_code_rule";
 
        /**
+        * Used to select TCP's default initial receiver window size in segments - defaults to a build config value
+        * @hide
+        */
+       public static final String TCP_DEFAULT_INIT_RWND = "tcp_default_init_rwnd";
+
+       /**
         * Used to disable Tethering on a device - defaults to true
         * @hide
         */
@@ -8976,11 +8982,11 @@ public final class Settings {
         */
        public static final String WIFI_COUNTRY_CODE = "wifi_country_code";
 
-        /**
-         * 802.11 country code in ISO 3166 format custom user value
-         * @hide
-         */
-        public static final String WIFI_COUNTRY_CODE_USER = "wifi_country_code_user";
+       /**
+        * 802.11 country code in ISO 3166 format custom user value
+        * @hide
+        */
+       public static final String WIFI_COUNTRY_CODE_USER = "wifi_country_code_user";
 
        /**
         * The interval in milliseconds to issue wake up scans when wifi needs

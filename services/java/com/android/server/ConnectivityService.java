@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2012, 2013. The Linux Foundation. All rights reserved.
+ * Not a Contribution.
  * Copyright (C) 2008 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,7 +46,9 @@ import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.ContentObserver;
@@ -170,45 +174,47 @@ import javax.net.ssl.SSLSession;
 public class ConnectivityService extends IConnectivityManager.Stub {
     private static final String TAG = "ConnectivityService";
 
-    private static final boolean DBG = true;
-    private static final boolean VDBG = false;
+    protected static final boolean DBG = true;
+    protected static final boolean VDBG = false;
 
-    private static final boolean LOGD_RULES = false;
+    protected static final boolean LOGD_RULES = false;
 
     // TODO: create better separation between radio types and network types
 
     // how long to wait before switching back to a radio's default network
-    private static final int RESTORE_DEFAULT_NETWORK_DELAY = 1 * 60 * 1000;
+    protected static final int RESTORE_DEFAULT_NETWORK_DELAY = 1 * 60 * 1000;
     // system property that can override the above value
-    private static final String NETWORK_RESTORE_DELAY_PROP_NAME =
+    protected static final String NETWORK_RESTORE_DELAY_PROP_NAME =
             "android.telephony.apn-restore";
 
     // Default value if FAIL_FAST_TIME_MS is not set
-    private static final int DEFAULT_FAIL_FAST_TIME_MS = 1 * 60 * 1000;
+    protected static final int DEFAULT_FAIL_FAST_TIME_MS = 1 * 60 * 1000;
     // system property that can override DEFAULT_FAIL_FAST_TIME_MS
-    private static final String FAIL_FAST_TIME_MS =
+    protected static final String FAIL_FAST_TIME_MS =
             "persist.radio.fail_fast_time_ms";
 
-    private static final String ACTION_PKT_CNT_SAMPLE_INTERVAL_ELAPSED =
+    protected static final String ACTION_PKT_CNT_SAMPLE_INTERVAL_ELAPSED =
             "android.net.ConnectivityService.action.PKT_CNT_SAMPLE_INTERVAL_ELAPSED";
 
-    private static final int SAMPLE_INTERVAL_ELAPSED_REQUEST_CODE = 0;
+    protected static final int SAMPLE_INTERVAL_ELAPSED_REQUEST_CODE = 0;
 
     private PendingIntent mSampleIntervalElapsedIntent;
 
     // Set network sampling interval at 12 minutes, this way, even if the timers get
     // aggregated, it will fire at around 15 minutes, which should allow us to
     // aggregate this timer with other timers (specially the socket keep alive timers)
-    private static final int DEFAULT_SAMPLING_INTERVAL_IN_SECONDS = (VDBG ? 30 : 12 * 60);
+
+    // Set sampling interval to -1 by default to turn of sampling.
+    protected static final int DEFAULT_SAMPLING_INTERVAL_IN_SECONDS = (VDBG ? 30 : -1 );
 
     // start network sampling a minute after booting ...
-    private static final int DEFAULT_START_SAMPLING_INTERVAL_IN_SECONDS = (VDBG ? 30 : 60);
+    protected static final int DEFAULT_START_SAMPLING_INTERVAL_IN_SECONDS = (VDBG ? 30 : 60);
 
     AlarmManager mAlarmManager;
 
     // used in recursive route setting to add gateways for the host for which
     // a host route was requested.
-    private static final int MAX_HOSTROUTE_CYCLE_COUNT = 10;
+    protected static final int MAX_HOSTROUTE_CYCLE_COUNT = 10;
 
     private Tethering mTethering;
 
@@ -274,17 +280,17 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     private INetworkManagementService mNetd;
     private INetworkPolicyManager mPolicyManager;
 
-    private static final int ENABLED  = 1;
-    private static final int DISABLED = 0;
+    protected static final int ENABLED  = 1;
+    protected static final int DISABLED = 0;
 
-    private static final boolean ADD = true;
-    private static final boolean REMOVE = false;
+    protected static final boolean ADD = true;
+    protected static final boolean REMOVE = false;
 
-    private static final boolean TO_DEFAULT_TABLE = true;
-    private static final boolean TO_SECONDARY_TABLE = false;
+    protected static final boolean TO_DEFAULT_TABLE = true;
+    protected static final boolean TO_SECONDARY_TABLE = false;
 
-    private static final boolean EXEMPT = true;
-    private static final boolean UNEXEMPT = false;
+    protected static final boolean EXEMPT = true;
+    protected static final boolean UNEXEMPT = false;
 
     /**
      * used internally as a delayed event to make us switch back to the
@@ -401,7 +407,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     private Collection<LinkAddress> mExemptAddresses = new ArrayList<LinkAddress>();
 
     // used in DBG mode to track inet condition reports
-    private static final int INET_CONDITION_LOG_MAX_SIZE = 15;
+    protected static final int INET_CONDITION_LOG_MAX_SIZE = 15;
     private ArrayList mInetLog;
 
     // track the current default http proxy - tell the world if we get a new one (real change)
@@ -415,6 +421,8 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     private PacManager mPacManager = null;
 
     private SettingsObserver mSettingsObserver;
+
+    private AppOpsManager mAppOpsManager;
 
     NetworkConfig[] mNetConfigs;
     int mNetworksDefined;
@@ -438,6 +446,8 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     private AtomicInteger mEnableFailFastMobileDataTag = new AtomicInteger(0);
 
     TelephonyManager mTelephonyManager;
+
+    protected ConnectivityService() { }
 
     public ConnectivityService(Context context, INetworkManagementService netd,
             INetworkStatsService statsService, INetworkPolicyManager policyManager) {
@@ -704,6 +714,8 @@ public class ConnectivityService extends IConnectivityManager.Stub {
         filter = new IntentFilter();
         filter.addAction(CONNECTED_TO_PROVISIONING_NETWORK_ACTION);
         mContext.registerReceiver(mProvisioningReceiver, filter);
+
+        mAppOpsManager = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
     }
 
     /**
@@ -1527,6 +1539,40 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     }
 
     /**
+     * Check if the address falls into any of currently running VPN's route's.
+     */
+    private boolean isAddressUnderVpn(InetAddress address) {
+        synchronized (mVpns) {
+            synchronized (mRoutesLock) {
+                int uid = UserHandle.getCallingUserId();
+                Vpn vpn = mVpns.get(uid);
+                if (vpn == null) {
+                    return false;
+                }
+
+                // Check if an exemption exists for this address.
+                for (LinkAddress destination : mExemptAddresses) {
+                    if (!NetworkUtils.addressTypeMatches(address, destination.getAddress())) {
+                        continue;
+                    }
+
+                    int prefix = destination.getNetworkPrefixLength();
+                    InetAddress addrMasked = NetworkUtils.getNetworkPart(address, prefix);
+                    InetAddress destMasked = NetworkUtils.getNetworkPart(destination.getAddress(),
+                            prefix);
+
+                    if (addrMasked.equals(destMasked)) {
+                        return false;
+                    }
+                }
+
+                // Finally check if the address is covered by the VPN.
+                return vpn.isAddressCovered(address);
+            }
+        }
+    }
+
+    /**
      * @deprecated use requestRouteToHostAddress instead
      *
      * Ensure that a network route exists to deliver traffic to the specified
@@ -1537,14 +1583,14 @@ public class ConnectivityService extends IConnectivityManager.Stub {
      * desired
      * @return {@code true} on success, {@code false} on failure
      */
-    public boolean requestRouteToHost(int networkType, int hostAddress) {
+    public boolean requestRouteToHost(int networkType, int hostAddress, String packageName) {
         InetAddress inetAddress = NetworkUtils.intToInetAddress(hostAddress);
 
         if (inetAddress == null) {
             return false;
         }
 
-        return requestRouteToHostAddress(networkType, inetAddress.getAddress());
+        return requestRouteToHostAddress(networkType, inetAddress.getAddress(), packageName);
     }
 
     /**
@@ -1556,10 +1602,39 @@ public class ConnectivityService extends IConnectivityManager.Stub {
      * desired
      * @return {@code true} on success, {@code false} on failure
      */
-    public boolean requestRouteToHostAddress(int networkType, byte[] hostAddress) {
+    public boolean requestRouteToHostAddress(int networkType, byte[] hostAddress,
+            String packageName) {
         enforceChangePermission();
         if (mProtectedNetworks.contains(networkType)) {
             enforceConnectivityInternalPermission();
+        }
+        boolean exempt;
+        InetAddress addr;
+        try {
+            addr = InetAddress.getByAddress(hostAddress);
+        } catch (UnknownHostException e) {
+            if (DBG) log("requestRouteToHostAddress got " + e.toString());
+            return false;
+        }
+        // System apps may request routes bypassing the VPN to keep other networks working.
+        if (Binder.getCallingUid() == Process.SYSTEM_UID) {
+            exempt = true;
+        } else {
+            mAppOpsManager.checkPackage(Binder.getCallingUid(), packageName);
+            try {
+                ApplicationInfo info = mContext.getPackageManager().getApplicationInfo(packageName,
+                        0);
+                exempt = (info.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            } catch (NameNotFoundException e) {
+                throw new IllegalArgumentException("Failed to find calling package details", e);
+            }
+        }
+
+        // Non-exempt routeToHost's can only be added if the host is not covered by the VPN.
+        // This can be either because the VPN's routes do not cover the destination or a
+        // system application added an exemption that covers this destination.
+        if (!exempt && isAddressUnderVpn(addr)) {
+            return false;
         }
 
         if (!ConnectivityManager.isNetworkTypeValid(networkType)) {
@@ -1587,18 +1662,13 @@ public class ConnectivityService extends IConnectivityManager.Stub {
         }
         final long token = Binder.clearCallingIdentity();
         try {
-            InetAddress addr = InetAddress.getByAddress(hostAddress);
             LinkProperties lp = tracker.getLinkProperties();
-            boolean ok = addRouteToAddress(lp, addr, EXEMPT);
+            boolean ok = addRouteToAddress(lp, addr, exempt);
             if (DBG) log("requestRouteToHostAddress ok=" + ok);
             return ok;
-        } catch (UnknownHostException e) {
-            if (DBG) log("requestRouteToHostAddress got " + e.toString());
         } finally {
             Binder.restoreCallingIdentity(token);
         }
-        if (DBG) log("requestRouteToHostAddress X bottom return false");
-        return false;
     }
 
     private boolean addRoute(LinkProperties p, RouteInfo r, boolean toDefaultTable,
@@ -2019,6 +2089,9 @@ public class ConnectivityService extends IConnectivityManager.Stub {
                     log("tryFailover: set mActiveDefaultNetwork=-1, prevNetType=" + prevNetType);
                 }
                 mActiveDefaultNetwork = -1;
+
+                // If there is no active connection then tcp delayed ack params are reset
+                resetTcpDelayedAckSettings(mNetTrackers[prevNetType]);
             }
 
             // don't signal a reconnect for anything lower or equal priority than our
@@ -2211,7 +2284,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
         }
     }
 
-    void systemReady() {
+    protected void systemReady() {
         mCaptivePortalTracker = CaptivePortalTracker.makeCaptivePortalTracker(mContext, this);
         loadGlobalProxy();
 
@@ -2315,9 +2388,12 @@ public class ConnectivityService extends IConnectivityManager.Stub {
             mInetConditionChangeInFlight = false;
             // Don't do this - if we never sign in stay, grey
             //reportNetworkCondition(mActiveDefaultNetwork, 100);
+
+            updateNetworkSettings(thisNet);
+            // Update TCP delayed ACK settings
+            updateTcpDelayedAckSettings(thisNet);
         }
         thisNet.setTeardownRequested(false);
-        updateNetworkSettings(thisNet);
         updateMtuSizeSettings(thisNet);
         handleConnectivityChange(newNetType, false);
         sendConnectedBroadcastDelayed(info, getConnectivityChangeDelay());
@@ -2702,6 +2778,15 @@ public class ConnectivityService extends IConnectivityManager.Stub {
             }
             setBufferSize(bufferSizes);
         }
+
+        final String defaultRwndKey = "net.tcp.default_init_rwnd";
+        int defaultRwndValue = SystemProperties.getInt(defaultRwndKey, 0);
+        Integer rwndValue = Settings.Global.getInt(mContext.getContentResolver(),
+            Settings.Global.TCP_DEFAULT_INIT_RWND, defaultRwndValue);
+        final String sysctlKey = "sys.sysctl.tcp_def_init_rwnd";
+        if (rwndValue != 0) {
+            SystemProperties.set(sysctlKey, rwndValue.toString());
+        }
     }
 
     /**
@@ -2728,6 +2813,120 @@ public class ConnectivityService extends IConnectivityManager.Stub {
             }
         } catch (IOException e) {
             loge("Can't set tcp buffer sizes:" + e);
+        }
+    }
+
+    /**
+     * [net.tcp.delack.wifi] and set them for system
+     * wide use
+     */
+    private void resetTcpDelayedAckSettings(NetworkStateTracker nt) {
+        String key1 = nt.getDefaultTcpUserConfigPropName();
+        String key2 = nt.getDefaultTcpDelayedAckPropName();
+
+        String defUserCfg = SystemProperties.get(key1);
+        String defDelAck = SystemProperties.get(key2);
+
+        if (TextUtils.isEmpty(defUserCfg) || defUserCfg.length() == 0) {
+            if (DBG) loge(key1+ " not found in system default properties");
+
+            // Setting to default values so we won't be stuck to previous values
+            // Disable user-overridden values to default
+            defUserCfg = "0";
+        }
+        setUserConfig(defUserCfg);
+
+        if(TextUtils.isEmpty(defDelAck) || defDelAck.length() == 0) {
+            if (DBG) loge(key2 + " not found in system default properties");
+
+            // Setting to default values so we won't be stuck to previous values
+            // Disable user-overridden values to default
+            defDelAck= "1";
+        }
+        setDelAckSize(defDelAck);
+    }
+
+    /**
+     * [net.tcp.delack.default] and set them for system
+     * wide use
+     */
+    private void updateTcpDelayedAckSettings(NetworkStateTracker nt) {
+        String key1 = nt.getTcpUserConfigPropName();
+        String key2 = nt.getTcpDelayedAckPropName();
+
+        String userCfg = SystemProperties.get(key1);
+        String delAck = SystemProperties.get(key2);
+
+        if (TextUtils.isEmpty(userCfg)) {
+            if (DBG) loge(key1 + " not found in system properties. Using defaults");
+
+            // Setting to default values so we won't be stuck to previous values
+            key1 = nt.getDefaultTcpUserConfigPropName();
+            userCfg = SystemProperties.get(key1);
+        }
+
+        if (TextUtils.isEmpty(delAck)) {
+            if (DBG) loge(key2 + " not found in system properties. Using defaults");
+
+            // Setting to default values so we won't be stuck to previous values
+            key2 = nt.getDefaultTcpDelayedAckPropName();
+            delAck = SystemProperties.get(key2);
+        }
+
+        // Set values in kernel
+        if (userCfg.length() != 0) {
+            if (DBG) {
+                log("Setting TCP values: [" + userCfg
+                        + "] which comes from [" + key1 + "]");
+            }
+            setUserConfig(userCfg);
+        }
+
+        if (delAck.length() != 0) {
+            if (DBG) {
+                log("Setting TCP values: [" + delAck
+                        + "] which comes from [" + key2 + "]");
+            }
+            setDelAckSize(delAck);
+        }
+    }
+
+    /**
+     * Writes TCP delayed ACK sizes to /sys/net/ipv4/tcp_delack_seg]
+     *
+     */
+    private void setDelAckSize(String delAckSize) {
+        try {
+            final String mProcFile = "/sys/kernel/ipv4/tcp_delack_seg";
+            int delAck = Integer.parseInt(delAckSize);
+
+            if (delAck <= 0 || delAck > 60) {
+               if (DBG) loge(" delAck size is out of range, configuring to default");
+               delAck = 1;
+            }
+
+            FileUtils.stringToFile(mProcFile, delAckSize);
+        } catch (IOException e) {
+            loge("Can't set delayed ACK size:" + e);
+        }
+    }
+
+    /**
+     * Writes TCP user configuration flag to /sys/net/ipv4/tcp_use_usercfg]
+     *
+     */
+    private void setUserConfig(String userConfig) {
+        try {
+            int userCfg = Integer.parseInt(userConfig);
+            final String mProcFile = "/sys/kernel/ipv4/tcp_use_userconfig";
+
+            if (userCfg == 0 || userCfg == 1) {
+                FileUtils.stringToFile(mProcFile, userConfig);
+            } else {
+                loge("Invalid buffersize string: " + userConfig);
+            }
+        } catch (IOException e) {
+            loge("Can't set delayed ACK size:" + e);
         }
     }
 
@@ -3044,7 +3243,10 @@ public class ConnectivityService extends IConnectivityManager.Stub {
                 case NetworkStateTracker.EVENT_NETWORK_SUBTYPE_CHANGED: {
                     info = (NetworkInfo) msg.obj;
                     int type = info.getType();
-                    updateNetworkSettings(mNetTrackers[type]);
+                    if (mNetConfigs[type].isDefault()) {
+                        updateNetworkSettings(mNetTrackers[type]);
+                        updateTcpDelayedAckSettings(mNetTrackers[type]);
+                    }
                     break;
                 }
             }
@@ -3548,7 +3750,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
         Slog.e(TAG, s);
     }
 
-    int convertFeatureToNetworkType(int networkType, String feature) {
+    protected int convertFeatureToNetworkType(int networkType, String feature) {
         int usedNetworkType = networkType;
 
         if(networkType == ConnectivityManager.TYPE_MOBILE) {
@@ -3603,8 +3805,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
             int user = UserHandle.getUserId(Binder.getCallingUid());
             if (ConnectivityManager.isNetworkTypeValid(type) && mNetTrackers[type] != null) {
                 synchronized(mVpns) {
-                    mVpns.get(user).protect(socket,
-                            mNetTrackers[type].getLinkProperties().getInterfaceName());
+                    mVpns.get(user).protect(socket);
                 }
                 return true;
             }
@@ -3725,7 +3926,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
      * be done whenever a better abstraction is developed.
      */
     public class VpnCallback {
-        private VpnCallback() {
+        protected VpnCallback() {
         }
 
         public void onStateChanged(NetworkInfo info) {
@@ -3844,7 +4045,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
                 boolean forwardDns) {
             try {
                 mNetd.clearUidRangeRoute(interfaze, uidStart, uidEnd);
-                if (forwardDns) mNetd.clearDnsInterfaceForUidRange(uidStart, uidEnd);
+                if (forwardDns) mNetd.clearDnsInterfaceForUidRange(interfaze, uidStart, uidEnd);
             } catch (RemoteException e) {
             }
 
@@ -4016,6 +4217,14 @@ public class ConnectivityService extends IConnectivityManager.Stub {
      */
     private static final int CMP_RESULT_CODE_PROVISIONING_NETWORK = 5;
 
+    /**
+     * The mobile network is provisioning
+     */
+    private static final int CMP_RESULT_CODE_IS_PROVISIONING = 6;
+
+    private AtomicBoolean mIsProvisioningNetwork = new AtomicBoolean(false);
+    private AtomicBoolean mIsStartingProvisioning = new AtomicBoolean(false);
+
     private AtomicBoolean mIsCheckingMobileProvisioning = new AtomicBoolean(false);
 
     @Override
@@ -4086,9 +4295,23 @@ public class ConnectivityService extends IConnectivityManager.Stub {
                                 setProvNotificationVisible(true,
                                         ConnectivityManager.TYPE_MOBILE_HIPRI, ni.getExtraInfo(),
                                         url);
+                                // Mark that we've got a provisioning network and
+                                // Disable Mobile Data until user actually starts provisioning.
+                                mIsProvisioningNetwork.set(true);
+                                MobileDataStateTracker mdst = (MobileDataStateTracker)
+                                        mNetTrackers[ConnectivityManager.TYPE_MOBILE];
+                                mdst.setInternalDataEnable(false);
                             } else {
                                 if (DBG) log("CheckMp.onComplete: warm (no dns/tcp), no url");
                             }
+                            break;
+                        }
+                        case CMP_RESULT_CODE_IS_PROVISIONING: {
+                            // FIXME: Need to know when provisioning is done. Probably we can
+                            // check the completion status if successful we're done if we
+                            // "timedout" or still connected to provisioning APN turn off data?
+                            if (DBG) log("CheckMp.onComplete: provisioning started");
+                            mIsStartingProvisioning.set(false);
                             break;
                         }
                         default: {
@@ -4102,7 +4325,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
             CheckMp.Params params =
                     new CheckMp.Params(checkMp.getDefaultUrl(), timeOutMs, cb);
             if (DBG) log("checkMobileProvisioning: params=" + params);
-            checkMp.execute(params);
+            checkMp.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, params);
         } finally {
             Binder.restoreCallingIdentity(token);
             if (DBG) log("checkMobileProvisioning: X");
@@ -4237,6 +4460,12 @@ public class ConnectivityService extends IConnectivityManager.Stub {
             if (mCs.isNetworkSupported(ConnectivityManager.TYPE_MOBILE) == false) {
                 result = CMP_RESULT_CODE_NO_CONNECTION;
                 log("isMobileOk: X not mobile capable result=" + result);
+                return result;
+            }
+
+            if (mCs.mIsStartingProvisioning.get()) {
+                result = CMP_RESULT_CODE_IS_PROVISIONING;
+                log("isMobileOk: X is provisioning result=" + result);
                 return result;
             }
 
@@ -4378,7 +4607,7 @@ public class ConnectivityService extends IConnectivityManager.Stub {
 
                             // Make a route to host so we check the specific interface.
                             if (mCs.requestRouteToHostAddress(ConnectivityManager.TYPE_MOBILE_HIPRI,
-                                    hostAddr.getAddress())) {
+                                    hostAddr.getAddress(), null)) {
                                 // Wait a short time to be sure the route is established ??
                                 log("isMobileOk:"
                                         + " wait to establish route to hostAddr=" + hostAddr);
@@ -4574,19 +4803,20 @@ public class ConnectivityService extends IConnectivityManager.Stub {
     };
 
     private void handleMobileProvisioningAction(String url) {
-        // Notication mark notification as not visible
+        // Mark notification as not visible
         setProvNotificationVisible(false, ConnectivityManager.TYPE_MOBILE_HIPRI, null, null);
 
         // If provisioning network handle as a special case,
         // otherwise launch browser with the intent directly.
-        NetworkInfo ni = getProvisioningNetworkInfo();
-        if ((ni != null) && ni.isConnectedToProvisioningNetwork()) {
-            if (DBG) log("handleMobileProvisioningAction: on provisioning network");
+        if (mIsProvisioningNetwork.get()) {
+            if (DBG) log("handleMobileProvisioningAction: on prov network enable then launch");
+            mIsStartingProvisioning.set(true);
             MobileDataStateTracker mdst = (MobileDataStateTracker)
                     mNetTrackers[ConnectivityManager.TYPE_MOBILE];
+            mdst.setEnableFailFastMobileData(DctConstants.ENABLED);
             mdst.enableMobileProvisioning(url);
         } else {
-            if (DBG) log("handleMobileProvisioningAction: on default network");
+            if (DBG) log("handleMobileProvisioningAction: not prov network, launch browser directly");
             Intent newIntent = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN,
                     Intent.CATEGORY_APP_BROWSER);
             newIntent.setData(Uri.parse(url));
@@ -4942,12 +5172,18 @@ public class ConnectivityService extends IConnectivityManager.Stub {
                 Settings.Global.CONNECTIVITY_SAMPLING_INTERVAL_IN_SECONDS,
                 DEFAULT_SAMPLING_INTERVAL_IN_SECONDS);
 
-        if (DBG) log("Setting timer for " + String.valueOf(samplingIntervalInSeconds) + "seconds");
+        // Only setAlarm if CONNECTIVITY_SAMPLING_INTERVAL_IN_SECONDS is set in
+        // Settings.db or VDBG is true. Otherwise, DEFAULT_SAMPLING_INTERVAL_IN_SECONDS
+        // is set to -1 by default.
+        if ( samplingIntervalInSeconds > 0 ){
+            if (DBG) log("Setting timer for " +
+                         String.valueOf(samplingIntervalInSeconds) + "seconds");
 
-        setAlarm(samplingIntervalInSeconds * 1000, mSampleIntervalElapsedIntent);
+            setAlarm(samplingIntervalInSeconds * 1000, mSampleIntervalElapsedIntent);
+        }
     }
 
-    void setAlarm(int timeoutInMilliseconds, PendingIntent intent) {
+    protected void setAlarm(int timeoutInMilliseconds, PendingIntent intent) {
         long wakeupTime = SystemClock.elapsedRealtime() + timeoutInMilliseconds;
         mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, wakeupTime, intent);
     }
