@@ -25,6 +25,7 @@ import android.app.ActivityManager;
 import android.app.ActivityManager.RunningAppProcessInfo;
 import android.app.ActivityManagerNative;
 import android.app.ActivityOptions;
+import android.app.INotificationManager;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.StatusBarManager;
@@ -97,6 +98,7 @@ import com.android.internal.statusbar.StatusBarIcon;
 import com.android.internal.statusbar.StatusBarIconList;
 import com.android.systemui.statusbar.phone.Ticker;
 import com.android.internal.widget.SizeAdaptiveLayout;
+import com.android.internal.util.omni.OmniSwitchConstants;
 import com.android.internal.util.slim.ButtonConfig;
 import com.android.internal.util.slim.DeviceUtils;
 import com.android.systemui.R;
@@ -125,9 +127,15 @@ import com.android.systemui.statusbar.SignalClusterView;
 import com.android.systemui.statusbar.view.PieStatusPanel;
 import com.android.systemui.statusbar.view.PieExpandPanel;
 
+// pa hover
+import com.android.systemui.statusbar.notification.Hover;
+import com.android.systemui.statusbar.notification.HoverCling;
+
 // pa peek
 import com.android.systemui.statusbar.notification.NotificationHelper;
 import com.android.systemui.statusbar.notification.Peek;
+
+import com.vanir.util.RecentsConstants;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -166,6 +174,7 @@ public abstract class BaseStatusBar extends SystemUI implements
     public static final int EXPANDED_FULL_OPEN = -10001;
 
     protected CommandQueue mCommandQueue;
+    protected INotificationManager mNotificationManager;
     protected IStatusBarService mBarService;
     protected H mHandler = createHandler();
 
@@ -216,6 +225,14 @@ public abstract class BaseStatusBar extends SystemUI implements
     protected ImageView mHaloButton;
     protected boolean mHaloButtonVisible = true;
 
+    // Hover
+    protected Hover mHover;
+    protected boolean mHoverEnabled;
+    protected boolean mHoverActive;
+    protected boolean mHoverHideButton;
+    protected ImageView mHoverButton;
+    protected HoverCling mHoverCling;
+
     /**
      * An interface for navigation key bars to allow status bars to signal which keys are
      * currently of interest to the user.<br>
@@ -254,6 +271,8 @@ public abstract class BaseStatusBar extends SystemUI implements
     // Peek
     protected Peek mPeek;
 
+    private SettingsObserver mSettingsObserver;
+
     // UI-specific methods
 
     /**
@@ -275,9 +294,8 @@ public abstract class BaseStatusBar extends SystemUI implements
     }
 
     // Recents Style
-    private RecentController slimRecents;
-    private RecentsComponent stockRecents;
-    private int mCustomRecent;
+    private RecentsComponent mRecents;
+    public int mCustomRecent = 0;
 
     protected ActiveDisplayView mActiveDisplayView;
 
@@ -303,6 +321,14 @@ public abstract class BaseStatusBar extends SystemUI implements
 
     public NotificationData getNotificationData() {
         return mNotificationData;
+    }
+
+    public INotificationManager getNotificationManager() {
+        return mNotificationManager;
+    }
+
+    public RemoteViews.OnClickHandler getNotificationClickHandler() {
+        return mOnClickHandler;
     }
 
     private ActivityManager mActivityManager;
@@ -338,7 +364,7 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
     };
 
-     private ContentObserver mProvisioningObserver = new ContentObserver(mHandler) {
+    private ContentObserver mProvisioningObserver = new ContentObserver(mHandler) {
         @Override
         public void onChange(boolean selfChange) {
             final boolean provisioned = 0 != Settings.Global.getInt(
@@ -347,6 +373,63 @@ public abstract class BaseStatusBar extends SystemUI implements
                 mDeviceProvisioned = provisioned;
                 updateNotificationIcons();
             }
+        }
+    };
+
+    private class SettingsObserver extends ContentObserver {
+        public SettingsObserver(Handler handler) {
+            super(handler);
+        }
+
+        public void observe() {
+            final ContentResolver resolver = mContext.getContentResolver();
+            resolver.registerContentObserver(
+                Settings.System.getUriFor(Settings.System.RECENTS_STYLE), false, this);
+            update();
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+        }
+
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            if (uri.equals(Settings.System.getUriFor(
+                    Settings.System.RECENTS_STYLE))) {
+                final int newCustomRecent = Settings.System.getInt(mContext.getContentResolver(),
+                        Settings.System.RECENTS_STYLE, 0);
+
+                switch (newCustomRecent) {
+                    // Default AOSP recents
+                    case RecentsConstants.RECENTS_AOSP:
+                    case RecentsConstants.RECENTS_HTC:
+                    case RecentsConstants.RECENTS_HTC_LARGE:
+                        if (mRecents == null || newCustomRecent != mCustomRecent) {
+                            mRecents = getComponent(RecentsComponent.class);
+                            mCustomRecent = newCustomRecent;
+                        }
+                        break;
+                    // Slim recents
+                    case RecentsConstants.RECENTS_SLIM:
+                        if (mRecents == null || newCustomRecent != mCustomRecent) {
+                            mRecents = (RecentsComponent)new RecentController(mContext, mLayoutDirection);
+                            mCustomRecent = newCustomRecent;
+                        }
+                        break;
+                    // Omniswitch recents
+                    case RecentsConstants.RECENTS_OMNI:
+                        mRecents = null;
+                        mCustomRecent = newCustomRecent;
+                        break;
+                }
+            } else {
+                update();
+            }
+        }
+
+        private void update() {
+            final ContentResolver resolver = mContext.getContentResolver();
+            return;
         }
     };
 
@@ -385,6 +468,12 @@ public abstract class BaseStatusBar extends SystemUI implements
             if (DEBUG) {
                 Log.v(TAG, "Notification click handler invoked for intent: " + pendingIntent);
             }
+
+            // User is clicking a button inside the notification, stop countdowns and
+            // restart override one depending on notification expansion.
+            // We just ignore incoming call case cause is handled differently, as soon as dialer shows, is gone.
+            mHover.processOverridingQueue(mHover.isExpanded());
+
             final boolean isActivity = pendingIntent.isActivity();
             if (isActivity) {
                 try {
@@ -482,6 +571,8 @@ public abstract class BaseStatusBar extends SystemUI implements
         mDreamManager = IDreamManager.Stub.asInterface(
                 ServiceManager.checkService(DreamService.DREAM_SERVICE));
         mPowerManager = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
+        mNotificationManager = INotificationManager.Stub.asInterface(
+                ServiceManager.getService(Context.NOTIFICATION_SERVICE));
 
         mProvisioningObserver.onChange(false); // set up
         mContext.getContentResolver().registerContentObserver(
@@ -493,13 +584,24 @@ public abstract class BaseStatusBar extends SystemUI implements
         mBarService = IStatusBarService.Stub.asInterface(
                 ServiceManager.getService(Context.STATUS_BAR_SERVICE));
 
-        int mCustomRecent = Settings.System.getIntForUser(
-                        mContext.getContentResolver(), Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
+        mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(),
+                Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
 
-        if (mCustomRecent == 1) {
-            slimRecents = new RecentController(mContext, mLayoutDirection);
-        } else {
-            stockRecents = getComponent(RecentsComponent.class);
+        switch (mCustomRecent) {
+            // Default AOSP recents
+            case RecentsConstants.RECENTS_AOSP:
+            case RecentsConstants.RECENTS_HTC:
+            case RecentsConstants.RECENTS_HTC_LARGE:
+                mRecents = getComponent(RecentsComponent.class);
+                break;
+            // Slim recents
+            case RecentsConstants.RECENTS_SLIM:
+                mRecents = new RecentController(mContext, mLayoutDirection);
+                break;
+            // Omniswitch recents
+            case RecentsConstants.RECENTS_OMNI:
+                mRecents = null;
+                break;
         }
 
         mLocale = mContext.getResources().getConfiguration().locale;
@@ -508,9 +610,12 @@ public abstract class BaseStatusBar extends SystemUI implements
         mStatusBarContainer = new FrameLayout(mContext);
 
         mPeek = new Peek(this, mContext);
+        mHover = new Hover(this, mContext);
+        mHoverCling = new HoverCling(mContext);
         mNotificationHelper = new NotificationHelper(this, mContext);
 
         mPeek.setNotificationHelper(mNotificationHelper);
+        mHover.setNotificationHelper(mNotificationHelper);
 
         // Connect in to the status bar manager service
         StatusBarIconList iconList = new StatusBarIconList();
@@ -581,6 +686,8 @@ public abstract class BaseStatusBar extends SystemUI implements
 
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_USER_SWITCHED);
+        filter.addAction(OmniSwitchConstants.ACTION_SERVICE_START);
+        filter.addAction(OmniSwitchConstants.ACTION_SERVICE_STOP);
         mContext.registerReceiver(mBroadcastReceiver, filter);
         SidebarObserver observer = new SidebarObserver(mHandler);
         observer.observe();
@@ -630,6 +737,54 @@ public abstract class BaseStatusBar extends SystemUI implements
                 }
             });
             attachPie();
+
+        // Listen for HOVER enabled
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.HOVER_ENABLED),
+                        false, new ContentObserver(new Handler()) {
+            @Override
+            public void onChange(boolean selfChange) {
+                updateHoverActive();
+            }
+        });
+
+        // Listen for HOVER state
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.HOVER_ACTIVE),
+                        false, new ContentObserver(new Handler()) {
+            @Override
+            public void onChange(boolean selfChange) {
+                updateHoverActive();
+            }
+        });
+
+        // Listen for HOVER button override
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.HOVER_HIDE_BUTTON),
+                        false, new ContentObserver(new Handler()) {
+            @Override
+            public void onChange(boolean selfChange) {
+                updateHoverActive();
+            }
+        });
+
+        updateHoverActive();
+
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.DIALPAD_STATE),
+                        false, new ContentObserver(new Handler()) {
+            @Override
+            public void onChange(boolean selfChange) {
+                boolean showing = Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.DIALPAD_STATE, 0) != 0;
+                if(showing) mHover.dismissHover(false, false);
+            }
+        });
+    }
+
+    public Hover getHoverInstance() {
+        if(mHover == null) mHover = new Hover(this, mContext);
+        return mHover;
     }
 
     public void setHaloTaskerActive(boolean haloTaskerActive, boolean updateNotificationIcons) {
@@ -867,6 +1022,33 @@ public abstract class BaseStatusBar extends SystemUI implements
         return mPeek;
     }
 
+    protected void updateHoverButton(boolean shouldBeVisible) {
+        mHoverButton.setVisibility((mHoverEnabled && !mHoverHideButton && shouldBeVisible) ? View.VISIBLE : View.GONE);
+    }
+
+    protected void updateHoverButton() {
+        updateHoverButton(true);
+    }
+
+    public void updateHoverActive() {
+        mHoverEnabled = Settings.System.getIntForUser(mContext.getContentResolver(),
+                Settings.System.HOVER_ENABLED, 0, UserHandle.USER_CURRENT) == 1;
+
+        mHoverActive = mHoverEnabled &&
+                Settings.System.getIntForUser(mContext.getContentResolver(),
+                Settings.System.HOVER_ACTIVE, 0, UserHandle.USER_CURRENT) == 1;
+
+        mHoverHideButton = Settings.System.getIntForUser(mContext.getContentResolver(),
+                Settings.System.HOVER_HIDE_BUTTON, 0, UserHandle.USER_CURRENT) == 1;
+
+        updateHoverButton();
+        if (mHoverEnabled) {
+            mHoverButton.setImageResource(mHoverActive ?
+                    R.drawable.ic_notify_hover_pressed : R.drawable.ic_notify_hover_normal);
+        }
+        mHover.setHoverActive(mHoverActive);
+    }
+
     public PowerManager getPowerManagerInstance() {
         if(mPowerManager == null) mPowerManager
                 = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
@@ -1055,8 +1237,29 @@ public abstract class BaseStatusBar extends SystemUI implements
                             am.clearApplicationUserData(packageNameF,
                                     new FakeClearUserDataObserver());
                         } else if (item.getItemId() == R.id.notification_floating_item) {
-                            launchFloating(contentIntent);
-                            animateCollapsePanels(CommandQueue.FLAG_EXCLUDE_NONE);
+                            boolean allowed = true;
+                            try {
+                                // preloaded apps are added to the blacklist array when is recreated, handled in the notification manager
+                                allowed = mNotificationManager.isPackageAllowedForFloatingMode(packageNameF);
+                            } catch (android.os.RemoteException ex) {
+                                // System is dead
+                            }
+                            if (allowed) {
+                                if (contentIntent == null) {
+                                    String text = mContext.getResources().getString(R.string.status_bar_floating_no_interface);
+                                    int duration = Toast.LENGTH_SHORT;
+                                    animateCollapsePanels(CommandQueue.FLAG_EXCLUDE_NONE);
+                                    Toast.makeText(mContext, text, duration).show();
+                                } else {
+                                    launchFloating(contentIntent);
+                                    animateCollapsePanels(CommandQueue.FLAG_EXCLUDE_NONE);
+                                }
+                            } else {
+                                String text = mContext.getResources().getString(R.string.floating_mode_blacklisted_app);
+                                int duration = Toast.LENGTH_LONG;
+                                animateCollapsePanels(CommandQueue.FLAG_EXCLUDE_NONE);
+                                Toast.makeText(mContext, text, duration).show();
+                            }
                         } else {
                             return false;
                         }
@@ -1244,54 +1447,88 @@ public abstract class BaseStatusBar extends SystemUI implements
     };
 
     protected void toggleRecentsActivity() {
-        if (stockRecents != null || slimRecents != null) {
-        int mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(), 
-                        Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
-        if(mCustomRecent == 1)
-            slimRecents.toggleRecents(mDisplay, mLayoutDirection, getStatusBarView());
-        else
-            stockRecents.toggleRecents(mDisplay, mLayoutDirection, getStatusBarView());
+        switch (mCustomRecent) {
+            // Default, HTC & SLIM
+            case RecentsConstants.RECENTS_AOSP:
+            case RecentsConstants.RECENTS_HTC:
+            case RecentsConstants.RECENTS_HTC_LARGE:
+            case RecentsConstants.RECENTS_SLIM:
+                if (mRecents != null) {
+                    mRecents.toggleRecents(mDisplay, mLayoutDirection, getStatusBarView());
+                }
+                break;
+            // Omniswitch recents
+            case RecentsConstants.RECENTS_OMNI:
+                Intent showIntent = new Intent(OmniSwitchConstants.ACTION_TOGGLE_OVERLAY);
+                mContext.sendBroadcast(showIntent);
+                break;
         }
     }
 
     protected void preloadRecentTasksList() {
-        if (stockRecents != null || slimRecents != null) {
-        int mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(), 
-                        Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
-        if (mCustomRecent == 1)
-            slimRecents.preloadRecentTasksList();
-        else
-            stockRecents.preloadRecentTasksList();
+
+        switch (mCustomRecent) {
+            // Default recents && HTC
+            case RecentsConstants.RECENTS_AOSP:
+            case RecentsConstants.RECENTS_HTC:
+            case RecentsConstants.RECENTS_HTC_LARGE:
+            case RecentsConstants.RECENTS_SLIM:
+                if (mRecents != null) {
+                    mRecents.preloadRecentTasksList();
+                }
+                break;
+            // Omniswitch recents == noop
+            default:
+                break;
         }
     }
 
     protected void cancelPreloadingRecentTasksList() {
-        if (stockRecents != null || slimRecents != null) {
-        int mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(), 
-                        Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
-        if (mCustomRecent == 1)
-            slimRecents.cancelPreloadingRecentTasksList();
-        else
-            stockRecents.cancelPreloadingRecentTasksList();
+
+        switch (mCustomRecent) {
+            // Default recents && HTC
+            case RecentsConstants.RECENTS_AOSP:
+            case RecentsConstants.RECENTS_HTC:
+            case RecentsConstants.RECENTS_HTC_LARGE:
+            case RecentsConstants.RECENTS_SLIM:
+                if (mRecents != null) {
+                    mRecents.cancelPreloadingRecentTasksList();
+                }
+                break;
+            // Omniswitch recents == noop
+            default:
+                break;
         }
     }
 
     protected void closeRecents() {
-        if (stockRecents != null || slimRecents != null) {
-        int mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(), 
-                        Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
-        if (mCustomRecent == 1)
-            slimRecents.closeRecents();
-        else
-            stockRecents.closeRecents();
+
+        switch (mCustomRecent) {
+            // Default recents && HTC
+            case RecentsConstants.RECENTS_AOSP:
+            case RecentsConstants.RECENTS_HTC:
+            case RecentsConstants.RECENTS_HTC_LARGE:
+            case RecentsConstants.RECENTS_SLIM:
+                if (mRecents != null) {
+                    mRecents.closeRecents();
+                }
+                break;
+            // Omniswitch recents
+            case RecentsConstants.RECENTS_OMNI:
+                Intent hideIntent = new Intent(OmniSwitchConstants.ACTION_HIDE_OVERLAY);
+                mContext.sendBroadcast(hideIntent);
+                break;
         }
     }
 
     protected void rebuildRecentsScreen() {
-        int mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(), 
-                        Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
-        if (slimRecents != null && mCustomRecent == 1) {
-                slimRecents.rebuildRecentsScreen();
+        if (mCustomRecent == RecentsConstants.RECENTS_SLIM) {
+            try {
+                final RecentController attemptedUpcast = (RecentController)mRecents;
+                attemptedUpcast.rebuildRecentsScreen();
+            } catch(Exception ex) {
+                // merp??
+            }
         }
     }
 
@@ -1398,9 +1635,9 @@ public abstract class BaseStatusBar extends SystemUI implements
 
     public boolean inflateViews(NotificationData.Entry entry, ViewGroup parent) {
         int minHeight =
-                mContext.getResources().getDimensionPixelSize(R.dimen.notification_min_height);
+                mContext.getResources().getDimensionPixelSize(R.dimen.default_notification_min_height);
         int maxHeight =
-                mContext.getResources().getDimensionPixelSize(R.dimen.notification_max_height);
+                mContext.getResources().getDimensionPixelSize(R.dimen.default_notification_max_height);
         StatusBarNotification sbn = entry.notification;
         RemoteViews contentView = sbn.getNotification().contentView;
         RemoteViews bigContentView = sbn.getNotification().bigContentView;
@@ -1535,19 +1772,19 @@ public abstract class BaseStatusBar extends SystemUI implements
             } catch (RemoteException e) {
             }
 
-            //int flags = Intent.FLAG_FLOATING_WINDOW | Intent.FLAG_ACTIVITY_CLEAR_TASK;
+            int flags = Intent.FLAG_FLOATING_WINDOW | Intent.FLAG_ACTIVITY_CLEAR_TASK;
+            boolean allowed = true; // default on, except for preloaded false
+            try {
+                // preloaded apps are added to the blacklist array when is recreated, handled in the notification manager
+                allowed = mNotificationManager.isPackageAllowedForFloatingMode(mPkg);
+            } catch (android.os.RemoteException ex) {
+                // System is dead
+            }
             if (mPendingIntent != null) {
-
-                 if (mFloat && !"android".equals(mPkg)) {
-                    Intent transparent = new Intent(mContext, com.android.systemui.Transparent.class);
-                    transparent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_FLOATING_WINDOW);
-                    mContext.startActivity(transparent);
-                }
-
                 int[] pos = new int[2];
                 v.getLocationOnScreen(pos);
                 Intent overlay = new Intent();
-                if (mFloat) overlay.addFlags(Intent.FLAG_FLOATING_WINDOW | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                if (mFloat && allowed) overlay.addFlags(flags);
                 overlay.setSourceBounds(
                         new Rect(pos[0], pos[1], pos[0] + v.getWidth(), pos[1] + v.getHeight()));
                 try {
@@ -1556,8 +1793,8 @@ public abstract class BaseStatusBar extends SystemUI implements
                     // the stack trace isn't very helpful here.  Just log the exception message.
                     Log.w(TAG, "Sending contentIntent failed: " + e);
                 }
-            } else if(mIntent != null) {
-                //mIntent.addFlags(flags);
+            } else if (mIntent != null) {
+                if (mFloat && allowed) mIntent.addFlags(flags);
                 mContext.startActivity(mIntent);
             }
 
@@ -1625,6 +1862,10 @@ public abstract class BaseStatusBar extends SystemUI implements
         updateNotificationIcons();
 
         mPeek.removeNotification(entry.notification);
+
+        // If a notif is on hover list or currently showed in hover,
+        // remove (hide) it if system does.
+        mHover.removeNotification(entry);
 
         return entry.notification;
     }
@@ -1767,7 +2008,14 @@ public abstract class BaseStatusBar extends SystemUI implements
             } else {
                 mPeek.addNotification(entry.notification);
             }
+            mHover.addStatusBarNotification(entry.notification);
         } else {
+            // screen on - check if hover is enabled
+            if (mNotificationHelper.isHoverEnabled()) {
+                mHover.setNotification(entry, false);
+            } else {
+                mHover.addStatusBarNotification(entry.notification);
+            }
             mPeek.addNotification(entry.notification);
         }
 
@@ -1777,7 +2025,7 @@ public abstract class BaseStatusBar extends SystemUI implements
         addNotificationViews(createNotificationViews(key, notification));
     }
 
-    protected void updateExpansionStates() {
+    public void updateExpansionStates() {
         int N = mNotificationData.size();
         for (int i = 0; i < N; i++) {
             NotificationData.Entry entry = mNotificationData.get(i);
@@ -1800,6 +2048,14 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
     }
 
+    public void animateStatusBarOut() {
+        // should be overridden
+    }
+
+    public void animateStatusBarIn() {
+        // should be overridden
+    }
+
     protected abstract void haltTicker();
     protected abstract void setAreThereNotifications();
     public abstract void updateNotificationIcons();
@@ -1808,6 +2064,7 @@ public abstract class BaseStatusBar extends SystemUI implements
     protected abstract int getExpandedViewMaxHeight();
     protected abstract boolean shouldDisableNavbarGestures();
     protected abstract boolean isDisabled(int flag);
+    public abstract boolean isExpandedVisible();
 
     protected boolean isTopNotification(ViewGroup parent, NotificationData.Entry entry) {
         return parent != null && parent.indexOfChild(entry.row) == 0;
@@ -1867,7 +2124,8 @@ public abstract class BaseStatusBar extends SystemUI implements
 
         boolean updateTicker = (notification.getNotification().tickerText != null
                 && !TextUtils.equals(notification.getNotification().tickerText,
-                   oldEntry.notification.getNotification().tickerText)) || mHaloActive
+                   oldEntry.notification.getNotification().tickerText))
+                && (mHaloActive || !mHoverActive)
                 && !isDisabled(StatusBarManager.DISABLE_NOTIFICATION_TICKER);
         boolean isTopAnyway = isTopNotification(rowParent, oldEntry);
         if (contentsUnchanged && bigContentsUnchanged && (orderUnchanged || isTopAnyway)) {
@@ -1976,7 +2234,15 @@ public abstract class BaseStatusBar extends SystemUI implements
             } else {
                 mPeek.addNotification(entry.notification);
             }
+            mHover.addStatusBarNotification(entry.notification);
         } else {
+            // screen on - check if hover is enabled
+            if (mNotificationHelper.isHoverEnabled()) {
+                mHover.setNotification(entry, true);
+            } else {
+                // We pass this to hover here only if it doesn't show
+                mHover.addStatusBarNotification(entry.notification);
+            }
             mPeek.addNotification(entry.notification);
         }
 

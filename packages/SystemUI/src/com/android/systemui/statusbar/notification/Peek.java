@@ -70,6 +70,8 @@ public class Peek implements SensorActivityHandler.SensorChangedCallback {
     private final static String TAG = "Peek";
     public final static boolean DEBUG = false;
 
+    private static final String PEEK_APPLICATION = "com.jedga.peek";
+
     private static final float ICON_LOW_OPACITY = 0.3f;
     private static final long SCREEN_ON_START_DELAY = 300; // 300 ms
     private static final long REMOVE_VIEW_DELAY = 300; // 300 ms
@@ -113,10 +115,24 @@ public class Peek implements SensorActivityHandler.SensorChangedCallback {
         return mKeyguardManager.isKeyguardLocked() && mKeyguardManager.isKeyguardSecure();
     }
 
+    private boolean isPeekAppInstalled() {
+        return isPackageInstalled(PEEK_APPLICATION);
+    }
+
+    private boolean isPackageInstalled(String packagename) {
+        PackageManager pm = mContext.getPackageManager();
+        try {
+            pm.getPackageInfo(packagename, PackageManager.GET_ACTIVITIES);
+            return true;
+        } catch (NameNotFoundException e) {
+            return false;
+        }
+    }
+
     private void updateStatus() {
         mEnabled = Settings.System.getIntForUser(
                 mContext.getContentResolver(), Settings.System.PEEK_STATE,
-                0, UserHandle.USER_CURRENT) == 1;
+                0, UserHandle.USER_CURRENT) == 1 && !isPeekAppInstalled();
         if (mEnabled) {
             mSensorHandler.registerScreenReceiver();
         } else {
@@ -187,7 +203,8 @@ public class Peek implements SensorActivityHandler.SensorChangedCallback {
             @Override
             public boolean onTouch(View v, MotionEvent event) {
                 if(event.getAction() == MotionEvent.ACTION_UP) {
-                    // mStatusBar.dismissHover(); // hide hover if showing
+                    // hide hover if showing
+                    mStatusBar.getHoverInstance().dismissHover(false, false);
                     dismissNotification();
                 }
                 return true;
@@ -361,6 +378,16 @@ public class Peek implements SensorActivityHandler.SensorChangedCallback {
         boolean shouldDisplay = shouldDisplayNotification(n) || force;
         addNotification(n);
 
+        // first check if is blacklisted
+        boolean allowed = true; // default on
+        try {
+            allowed = mStatusBar.getNotificationManager().isPackageAllowedForPeek(n.getPackageName());
+        } catch (android.os.RemoteException ex) {
+            // System is dead
+        }
+        if(!allowed) return;
+
+        // not blacklisted, process it
         if(!mEnabled /* peek is disabled */
                 || (mPowerManager.isScreenOn() && !mShowing) /* no peek when screen is on */
                 || !shouldDisplay /* notification has already been displayed */

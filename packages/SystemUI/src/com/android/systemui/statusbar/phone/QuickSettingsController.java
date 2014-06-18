@@ -64,6 +64,7 @@ import static com.android.internal.util.slim.QSConstants.TILE_BATTERYSAVER;
 import static com.android.internal.util.slim.QSConstants.TILE_WEATHER;
 import static com.android.internal.util.slim.QSConstants.TILE_SCREENCAST;
 import static com.android.internal.util.slim.QSConstants.TILE_COMPASS;
+import static com.android.internal.util.slim.QSConstants.TILE_HOVER;
 
 import android.app.Activity;
 import android.app.ActivityManagerNative;
@@ -136,6 +137,7 @@ import com.android.systemui.quicksettings.OnTheGoTile;
 import com.android.systemui.quicksettings.BatterySaverTile;
 import com.android.systemui.quicksettings.WeatherTile;
 import com.android.systemui.quicksettings.ScreenCastTile;
+import com.android.systemui.quicksettings.HoverTile;
 
 import com.android.systemui.R;
 
@@ -242,7 +244,7 @@ public class QuickSettingsController {
         for (String tile : tiles.split("\\|")) {
             QuickSettingsTile qs = null;
             if (tile.equals(TILE_USER)) {
-                qs = new UserTile(mContext, this);
+                qs = new UserTile(mContext, this, mHandler);
             } else if (tile.equals(TILE_BATTERY)) {
                 qs = new BatteryTile(mContext, this, mStatusBarService.mBatteryController);
             } else if (tile.equals(TILE_SETTINGS)) {
@@ -318,6 +320,8 @@ public class QuickSettingsController {
             } else if (tile.equals(TILE_WEATHER)) {
                 qs = new WeatherTile(mContext, this, mHandler);
                 WeatherDialog();
+            } else if (tile.equals(TILE_HOVER)) {
+                qs = new HoverTile(mContext, this);
             } else if (tile.equals(TILE_SHAKE)) {
                 qs = new ShakeEventTile(mContext, this);
             } else if (tile.contains(TILE_CUSTOM)) {

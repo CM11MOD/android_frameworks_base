@@ -28,6 +28,7 @@
     <!-- Whether recents thumbnails should stretch in both x and y to fill their
      ImageView -->
     <bool name="config_recents_thumbnail_image_fits_to_xy">false</bool>
+    <bool name="config_recents_thumbnail_image_fits_to_xy_sense">false</bool>
 
     <!-- Control whether status bar should distinguish HSPA data icon form UMTS
     data icon on devices -->
@@ -114,10 +115,9 @@
     <!-- Sensivity of pie gestures controlls.
         Must be minimum 1 and maximum 10 (See @EdgeServiceConstants.java).
         Default for pie is high sensivity -->
-    <integer name="pie_gesture_sensivity">8</integer>
+    <integer name="pie_gesture_sensivity">6</integer>
 
     <!-- Default value how much apps show the app screenshot on recents view entry -->
     <integer name="expanded_items_default">2</integer>
 
 </resources>
-

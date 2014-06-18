@@ -1267,4 +1267,5 @@ public interface WindowManagerPolicy {
      * @hide
      */
     public void updateStatusBarNavBarHeight();
+
 }

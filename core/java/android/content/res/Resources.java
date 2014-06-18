@@ -1569,6 +1569,10 @@ public class Resources {
             if (metrics != null) {
                 mMetrics.setTo(metrics);
             }
+
+            if (config != null) {
+                mMetrics.updateConfiguration(config);
+            }
             mMetrics.updateDensity();
             // NOTE: We should re-arrange this code to create a Display
             // with the CompatibilityInfo that is used everywhere we deal
@@ -1614,7 +1618,6 @@ public class Resources {
                 mMetrics.densityDpi = mConfiguration.densityDpi;
                 mMetrics.density = mConfiguration.densityDpi * DisplayMetrics.DENSITY_DEFAULT_SCALE;
             }
-            mMetrics.scaledDensity = mMetrics.density * mConfiguration.fontScale;
 
             String locale = null;
             if (mConfiguration.locale != null) {

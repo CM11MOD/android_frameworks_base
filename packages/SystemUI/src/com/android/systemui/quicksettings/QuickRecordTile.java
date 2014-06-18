@@ -39,7 +39,7 @@ import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 
 public class QuickRecordTile extends QuickSettingsTile {
 
@@ -50,6 +50,7 @@ public class QuickRecordTile extends QuickSettingsTile {
     private static final String RECORDING_NAME = "QuickRecord ";
     private static final String DELIMITER = "|";
     private static final String RECORDING_TYPE = ".3gp";
+    private static final SimpleDateFormat DATE = new SimpleDateFormat("MMM dd, yyyy - HH:mm:ss");
 
     public static final int STATE_IDLE = 0;
     public static final int STATE_PLAYING = 1;
@@ -203,7 +204,7 @@ public class QuickRecordTile extends QuickSettingsTile {
             // Return the name of the new recording
             File file = new File(mContext.getFilesDir() + File.separator
                     + RECORDING_NAME + DELIMITER
-                    + DateFormat.getDateTimeInstance().format(System.currentTimeMillis())
+                    + DATE.format(System.currentTimeMillis()).toUpperCase()
                     + DELIMITER + RECORDING_TYPE);
             mQuickAudio = file.getAbsolutePath();
             mExists = true;

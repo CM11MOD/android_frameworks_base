@@ -22,6 +22,7 @@ import android.animation.TimeInterpolator;
 import android.app.ActivityManager;
 import android.app.ActivityManagerNative;
 import android.app.ActivityOptions;
+import android.app.INotificationManager;
 import android.app.TaskStackBuilder;
 import android.app.admin.DevicePolicyManager;
 import android.content.ActivityNotFoundException;
@@ -55,6 +56,7 @@ import android.graphics.Bitmap.Config;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.RemoteException;
+import android.os.ServiceManager;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.util.AttributeSet;
@@ -82,6 +84,7 @@ import android.widget.ImageView;
 import android.widget.ImageView.ScaleType;
 import android.widget.PopupMenu;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.android.systemui.R;
 import com.android.systemui.statusbar.BaseStatusBar;
@@ -129,6 +132,8 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
     private boolean mHighEndGfx;
     private ImageView mClearRecents;
     private int mCustomRecent;
+    private RecentsActivity mRecentsActivity;
+    private INotificationManager mNotificationManager;
 
     private LinearColorBar mRamUsageBar;
 
@@ -136,8 +141,6 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
     private long mTotalMemory;
     private long mCachedMemory;
     private long mActiveMemory;
-
-    private RecentsActivity mRecentsActivity;
 
     TextView mUsedMemText;
     TextView mFreeMemText;
@@ -171,7 +174,8 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
     /* package */ public final static class ViewHolder {
         View thumbnailView;
         ImageView thumbnailViewImage;
-        Bitmap thumbnailViewImageBitmap;
+        Drawable thumbnailViewDrawable;
+        Drawable thumbnailDrawable;
         ImageView iconView;
         ImageView lockedIcon;
         TextView labelView;
@@ -211,7 +215,7 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
             // the thumbnail later (if they both have the same dimensions)
             updateThumbnail(holder, mRecentTasksLoader.getDefaultThumbnail(), false, false);
             holder.iconView = (ImageView) convertView.findViewById(R.id.app_icon);
-            holder.iconView.setImageBitmap(mRecentTasksLoader.getDefaultIcon());
+            holder.iconView.setImageDrawable(mRecentTasksLoader.getDefaultIcon());
             holder.labelView = (TextView) convertView.findViewById(R.id.app_label);
             holder.calloutLine = convertView.findViewById(R.id.recents_callout_line);
             holder.descriptionView = (TextView) convertView.findViewById(R.id.app_description);
@@ -304,7 +308,7 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
         public void recycleView(View v) {
             ViewHolder holder = (ViewHolder) v.getTag();
             updateThumbnail(holder, mRecentTasksLoader.getDefaultThumbnail(), false, false);
-            holder.iconView.setImageBitmap(mRecentTasksLoader.getDefaultIcon());
+            holder.iconView.setImageDrawable(mRecentTasksLoader.getDefaultIcon());
             holder.iconView.setVisibility(INVISIBLE);
             holder.iconView.animate().cancel();
             holder.labelView.setText(null);
@@ -354,7 +358,18 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
 
     public RecentsPanelView(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
-        updateValuesFromResources();
+
+        final Resources res = context.getResources();
+        int mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(), 
+                        Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
+
+        if (mCustomRecent == 4) {
+            mFitThumbnailToXY = res.getBoolean(R.bool.config_recents_thumbnail_image_fits_to_xy_sense);
+            mThumbnailWidth = Math.round(res.getDimension(R.dimen.status_bar_recents_thumbnail_width_sense));
+        } else {
+            mThumbnailWidth = Math.round(res.getDimension(R.dimen.status_bar_recents_thumbnail_width));
+            mFitThumbnailToXY = res.getBoolean(R.bool.config_recents_thumbnail_image_fits_to_xy);
+        }
 
         TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.RecentsPanelView,
                 defStyle, 0);
@@ -420,17 +435,13 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
         }
     }
 
-    static void sendCloseSystemWindows(Context context, String reason) {
+    private void showImpl(boolean show) {
         if (ActivityManagerNative.isSystemReady()) {
             try {
-                ActivityManagerNative.getDefault().closeSystemDialogs(reason);
+                ActivityManagerNative.getDefault().closeSystemDialogs(BaseStatusBar.SYSTEM_DIALOG_REASON_RECENT_APPS);
             } catch (RemoteException e) {
             }
         }
-    }
-
-    private void showImpl(boolean show) {
-        sendCloseSystemWindows(mContext, BaseStatusBar.SYSTEM_DIALOG_REASON_RECENT_APPS);
 
         mShowing = show;
 
@@ -608,12 +619,6 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
         mRecentTasksLoader = loader;
     }
 
-    public void updateValuesFromResources() {
-        final Resources res = mContext.getResources();
-        mThumbnailWidth = Math.round(res.getDimension(R.dimen.status_bar_recents_thumbnail_width));
-        mFitThumbnailToXY = res.getBoolean(R.bool.config_recents_thumbnail_image_fits_to_xy);
-    }
-
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
@@ -670,7 +675,7 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
                 ((BitmapDrawable) mRecentsScrim.getBackground()).setTileModeY(TileMode.REPEAT);
             }
         }
-	updateRamBar();
+    	updateRamBar();
     }
 
     /**
@@ -735,7 +740,55 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
         }
     }
 
-    private void updateThumbnail(ViewHolder h, Bitmap thumbnail, boolean show, boolean anim) {
+    /**
+* Convert drawable to bitmap.
+*
+* @param drawable Drawable object to be converted.
+* @return converted bitmap.
+*/
+    private Bitmap drawableToBitmap(Drawable drawable) {
+
+            Bitmap thumbnail;
+
+            if(drawable instanceof BitmapDrawable) {
+                thumbnail = ((BitmapDrawable) drawable).getBitmap();
+            } else {
+                Bitmap bitmap = Bitmap.createBitmap(drawable.getIntrinsicWidth(),drawable.getIntrinsicHeight(), Config.ARGB_8888);
+                Canvas canvas = new Canvas(bitmap);
+                drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+                drawable.draw(canvas);
+                thumbnail = bitmap;
+            }
+             
+            final int reflectionGap = 4;
+            int width = thumbnail.getWidth();
+            int height = thumbnail.getHeight();
+
+            Matrix matrix = new Matrix();
+            matrix.preScale(1, -1);
+
+            Bitmap reflectionImage = Bitmap.createBitmap(thumbnail, 0, height * 2 / 3, width, height/3, matrix, false);
+            Bitmap bitmapWithReflection = Bitmap.createBitmap(width, (height + height/3), Config.ARGB_8888);
+
+            Canvas canvas = new Canvas(bitmapWithReflection);
+            canvas.drawBitmap(thumbnail, 0, 0, null);
+            Paint defaultPaint = new Paint();
+            canvas.drawRect(0, height, width, height + reflectionGap, defaultPaint);
+            canvas.drawBitmap(reflectionImage, 0, height + reflectionGap, null);
+
+            Paint paint = new Paint();
+            LinearGradient shader = new LinearGradient(0, thumbnail.getHeight(), 0,
+                bitmapWithReflection.getHeight() + reflectionGap, 0x70ffffff, 0x00ffffff,
+                TileMode.CLAMP);
+            paint.setShader(shader);
+            paint.setXfermode(new PorterDuffXfermode(Mode.DST_IN));
+            canvas.drawRect(0, height, width,
+                bitmapWithReflection.getHeight() + reflectionGap, paint);
+
+            return bitmapWithReflection;
+    }
+
+    private void updateThumbnail(ViewHolder h, Drawable thumbnail, boolean show, boolean anim) {
         if (thumbnail != null) {
             // Should remove the default image in the frame
             // that this now covers, to improve scrolling speed.
@@ -743,57 +796,33 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
             int mCustomRecent = Settings.System.getIntForUser(mContext.getContentResolver(), 
                         Settings.System.RECENTS_STYLE, 0, UserHandle.USER_CURRENT);
 
-            if(mCustomRecent == 2) {
-
-                final int reflectionGap = 4;
-                int width = thumbnail.getWidth();
-                int height = thumbnail.getHeight();
-
-                Matrix matrix = new Matrix();
-                matrix.preScale(1, -1);
-
-                Bitmap reflectionImage = Bitmap.createBitmap(thumbnail, 0, height * 2 / 3, width, height/3, matrix, false);
-                Bitmap bitmapWithReflection = Bitmap.createBitmap(width, (height + height/3), Config.ARGB_8888);
-
-                Canvas canvas = new Canvas(bitmapWithReflection);
-                canvas.drawBitmap(thumbnail, 0, 0, null);
-                Paint defaultPaint = new Paint();
-                canvas.drawRect(0, height, width, height + reflectionGap, defaultPaint);
-                canvas.drawBitmap(reflectionImage, 0, height + reflectionGap, null);
-
-                Paint paint = new Paint();
-                LinearGradient shader = new LinearGradient(0, thumbnail.getHeight(), 0,
-                    bitmapWithReflection.getHeight() + reflectionGap, 0x70ffffff, 0x00ffffff,
-                    TileMode.CLAMP);
-                paint.setShader(shader);
-                paint.setXfermode(new PorterDuffXfermode(Mode.DST_IN));
-                canvas.drawRect(0, height, width,
-                    bitmapWithReflection.getHeight() + reflectionGap, paint);
-
-                h.thumbnailViewImage.setImageBitmap(bitmapWithReflection);
-            } else {
-                h.thumbnailViewImage.setImageBitmap(thumbnail);
+            if(mCustomRecent == 3 || mCustomRecent == 4) {
+                h.thumbnailDrawable = new BitmapDrawable(drawableToBitmap(thumbnail));
+                if (h.thumbnailDrawable != null)
+                    thumbnail = h.thumbnailDrawable; 
             }
+
+            h.thumbnailViewImage.setImageDrawable(thumbnail);
 
             // scale the image to fill the full width of the ImageView. do this only if
             // we haven't set a bitmap before, or if the bitmap size has changed
-            if (h.thumbnailViewImageBitmap == null ||
-                h.thumbnailViewImageBitmap.getWidth() != thumbnail.getWidth() ||
-                h.thumbnailViewImageBitmap.getHeight() != thumbnail.getHeight()) {
+            if (h.thumbnailViewDrawable == null ||
+                h.thumbnailViewDrawable.getIntrinsicWidth() != thumbnail.getIntrinsicWidth() ||
+                h.thumbnailViewDrawable.getIntrinsicHeight() != thumbnail.getIntrinsicHeight()) {
                 if (mFitThumbnailToXY) {
                     h.thumbnailViewImage.setScaleType(ScaleType.FIT_XY);
-                    if(mCustomRecent == 2) {
+                    if(mCustomRecent == 3 || mCustomRecent == 4) {
                         h.thumbnailViewImage.setRotationY(25.0f);
                     }
                 } else {
-                    if(mCustomRecent == 2) {
+                    if(mCustomRecent == 3 || mCustomRecent == 4) {
                         h.thumbnailViewImage.setScaleType(ScaleType.FIT_CENTER);
                         h.thumbnailViewImage.setRotationY(25.0f);
-                        if (DEBUG) Log.d(TAG, "thumbnail.getHeight(): " + thumbnail.getHeight());
-                        if (DEBUG) Log.d(TAG, "thumbnail.getWidth(): " + thumbnail.getWidth());
+                        if (DEBUG) Log.d(TAG, "thumbnail.getHeight(): " + thumbnail.getIntrinsicHeight());
+                        if (DEBUG) Log.d(TAG, "thumbnail.getWidth(): " + thumbnail.getIntrinsicWidth());
                     } else {
                         Matrix scaleMatrix = new Matrix();
-                        float scale = mThumbnailWidth / (float) thumbnail.getWidth();
+                        float scale = mThumbnailWidth / (float) thumbnail.getIntrinsicWidth();
                         scaleMatrix.setScale(scale, scale);
                         h.thumbnailViewImage.setScaleType(ScaleType.MATRIX);
                         h.thumbnailViewImage.setImageMatrix(scaleMatrix);
@@ -807,7 +836,7 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
                 }
                 h.thumbnailView.setVisibility(View.VISIBLE);
             }
-            h.thumbnailViewImageBitmap = thumbnail;
+            h.thumbnailViewDrawable = thumbnail;
         }
     }
 
@@ -952,20 +981,23 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
     }
 
     public void handleOnClick(View view) {
-        ViewHolder holder = (ViewHolder)view.getTag();
+        ViewHolder holder = (ViewHolder) view.getTag();
         TaskDescription ad = holder.taskDescription;
         final Context context = view.getContext();
         final ActivityManager am = (ActivityManager)
                 context.getSystemService(Context.ACTIVITY_SERVICE);
-        Bitmap bm = holder.thumbnailViewImageBitmap;
-        boolean usingDrawingCache;
-        if (bm.getWidth() == holder.thumbnailViewImage.getWidth() &&
-                bm.getHeight() == holder.thumbnailViewImage.getHeight()) {
-            usingDrawingCache = false;
-        } else {
+        Bitmap bm = null;
+        boolean usingDrawingCache = true;
+        if (holder.thumbnailViewDrawable instanceof BitmapDrawable) {
+            bm = ((BitmapDrawable) holder.thumbnailViewDrawable).getBitmap();
+            if (bm.getWidth() == holder.thumbnailViewImage.getWidth() &&
+                    bm.getHeight() == holder.thumbnailViewImage.getHeight()) {
+                usingDrawingCache = false;
+            }
+        }
+        if (usingDrawingCache) {
             holder.thumbnailViewImage.setDrawingCacheEnabled(true);
             bm = holder.thumbnailViewImage.getDrawingCache();
-            usingDrawingCache = true;
         }
         Bundle opts = (bm == null) ?
                 null :
@@ -1173,6 +1205,11 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
         thumbnailView.setSelected(true);
         final PopupMenu popup =
             new PopupMenu(mContext, anchorView == null ? selectedView : anchorView);
+        // initialize if null
+        if (mNotificationManager == null) {
+            mNotificationManager = INotificationManager.Stub.asInterface(
+                    ServiceManager.getService(Context.NOTIFICATION_SERVICE));
+        }
         mPopup = popup;
         popup.getMenuInflater().inflate(R.menu.recent_popup_menu, popup.getMenu());
 
@@ -1248,7 +1285,23 @@ public class RecentsPanelView extends FrameLayout implements OnItemClickListener
                 } else if (item.getItemId() == R.id.recent_launch_floating) {
                     if (viewHolder != null) {
                         final TaskDescription ad = viewHolder.taskDescription;
-                        dismissAndGoBack();
+                        String currentViewPackage = ad.packageName;
+                        boolean allowed = true; // default on
+                        try {
+                            // preloaded apps are added to the blacklist array when is recreated, handled in the notification manager
+                            allowed = mNotificationManager.isPackageAllowedForFloatingMode(currentViewPackage);
+                        } catch (android.os.RemoteException ex) {
+                            // System is dead
+                        }
+                        if (!allowed) {
+                            dismissAndGoBack();
+                            String text = mContext.getResources().getString(R.string.floating_mode_blacklisted_app);
+                            int duration = Toast.LENGTH_LONG;
+                            Toast.makeText(mContext, text, duration).show();
+                            return true;
+                        } else {
+                            dismissAndGoBack();
+                        }
                         selectedView.post(new Runnable() {
                             @Override
                             public void run() {
