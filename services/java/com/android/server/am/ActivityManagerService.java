@@ -1698,9 +1698,7 @@ public final class ActivityManagerService extends ActivityManagerNative
                 break;
             }
             case REQUEST_ALL_PSS_MSG: {
-                synchronized (ActivityManagerService.this) {
-                    requestPssAllProcsLocked(SystemClock.uptimeMillis(), true, false);
-                }
+                requestPssAllProcsLocked(SystemClock.uptimeMillis(), true, false);
                 break;
             }
             case POST_PRIVACY_NOTIFICATION_MSG: {
