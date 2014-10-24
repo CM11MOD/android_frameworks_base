@@ -235,7 +235,6 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     Point mCurrentDisplaySize = new Point();
     int mCurrUiThemeMode;
     int mCurrOrientation;
-    int mCurrentDensity;
     private float mHeadsUpVerticalOffset;
     private int[] mPilePosition = new int[2];
 
@@ -358,6 +357,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     private boolean mHeadsUpGravityBottom;
     private boolean mStatusBarShows = true;
     private boolean mImeIsShowing;
+    private int mHeadsUpCustomBg;
+    private int mHeadsUpCustomText;
 
     // on-screen navigation buttons
     private NavigationBarView mNavigationBarView = null;
@@ -390,6 +391,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     // ticker
     private View mTickerView;
     private boolean mTicking;
+    private boolean mTickerDisabled;
 
     // Tracking finger for opening/closing.
     int mEdgeBorder; // corresponds to R.dimen.status_bar_edge_ignore
@@ -648,10 +650,19 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.STATUS_BAR_CIRCLE_DOT_OFFSET), false, this);
             resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.HEADS_UP_BG_COLOR), false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.HEADS_UP_TEXT_COLOR), false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.RECENT_CARD_BG_COLOR), false, this,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.RECENT_CARD_TEXT_COLOR), false, this,
+                    UserHandle.USER_ALL);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.TICKER_DISABLED), false, this,
                     UserHandle.USER_ALL);
             update();
         }
@@ -823,6 +834,18 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                             UserHandle.USER_CURRENT) == 1;
                     updateHeadsUpPosition(mStatusBarShows);
             } else if (uri.equals(Settings.System.getUriFor(
+                    Settings.System.HEADS_UP_BG_COLOR))) {
+                    mHeadsUpCustomBg = Settings.System.getIntForUser(
+                        mContext.getContentResolver(),
+                        Settings.System.HEADS_UP_BG_COLOR, 0x00ffffff,
+                        UserHandle.USER_CURRENT);
+            } else if (uri.equals(Settings.System.getUriFor(
+                    Settings.System.HEADS_UP_TEXT_COLOR))) {
+                    mHeadsUpCustomText = Settings.System.getIntForUser(
+                        mContext.getContentResolver(),
+                        Settings.System.HEADS_UP_TEXT_COLOR, 0,
+                        UserHandle.USER_CURRENT);
+            } else if (uri.equals(Settings.System.getUriFor(
                     Settings.System.RECENT_CARD_BG_COLOR))) {
                 rebuildRecentsScreen();
             } else if (uri.equals(Settings.System.getUriFor(
@@ -939,6 +962,9 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
             mFlipInterval = Settings.System.getIntForUser(mContext.getContentResolver(),
                         Settings.System.REMINDER_ALERT_INTERVAL, 1500, UserHandle.USER_CURRENT);
+
+            mTickerDisabled = Settings.System.getIntForUser(mContext.getContentResolver(),
+                        Settings.System.TICKER_DISABLED, 0, UserHandle.USER_CURRENT) == 1;
 
             mDoubleTapToSleep = Settings.System.getIntForUser(mContext.getContentResolver(),
                 Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 0, UserHandle.USER_CURRENT) == 1;
@@ -1251,7 +1277,6 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         updateDisplaySize();
 
         mCurrUiThemeMode = mContext.getResources().getConfiguration().uiThemeMode;
-        mCurrentDensity = mContext.getResources().getConfiguration().densityDpi;
 
         mLocationController = new LocationController(mContext); // will post a notification
         mBatteryController = new BatteryController(mContext);
@@ -1626,6 +1651,9 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                 return true;
             }
         });
+
+        mTickerDisabled = Settings.System.getIntForUser(mContext.getContentResolver(),
+            Settings.System.TICKER_DISABLED, 0, UserHandle.USER_CURRENT) == 1;
 
         mTicker = new MyTicker(context, mStatusBarView);
 
@@ -2238,12 +2266,26 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             StatusBarNotification notification, Entry shadeEntry) {
         if (DEBUG) Log.d(TAG, "launching notification in heads up mode");
         Entry interruptionCandidate = new Entry(key, notification, null);
-        if (inflateViews(interruptionCandidate, mHeadsUpNotificationView.getHolder())) {
+
+        // get text color value
+        mHeadsUpCustomText = Settings.System.getIntForUser(
+            mContext.getContentResolver(),
+            Settings.System.HEADS_UP_TEXT_COLOR, 0,
+            UserHandle.USER_CURRENT);
+
+        if (inflateViews(interruptionCandidate,
+                mHeadsUpNotificationView.getHolder(), mHeadsUpCustomText)) {
             mInterruptingNotificationTime = System.currentTimeMillis();
             mInterruptingNotificationEntry = interruptionCandidate;
             if (shadeEntry != null) {
                 shadeEntry.setInterruption();
             }
+
+            // get background value
+            mHeadsUpCustomBg = Settings.System.getIntForUser(
+                mContext.getContentResolver(),
+                Settings.System.HEADS_UP_BG_COLOR, 0x00ffffff,
+                UserHandle.USER_CURRENT);
 
             // Either the user want to see every heads up expanded....or the app which
             // requests the heads up force it to show as expanded.
@@ -2254,7 +2296,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
             // 1. Populate mHeadsUpNotificationView
             mHeadsUpNotificationView.setNotification(
-                    mInterruptingNotificationEntry, isExpanded);
+                    mInterruptingNotificationEntry, isExpanded, mHeadsUpCustomBg);
 
             // 2. Animate mHeadsUpNotificationView in
             mHandler.sendEmptyMessage(MSG_SHOW_HEADS_UP);
@@ -3391,13 +3433,13 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             setVisibilityWhenDone(
                 ObjectAnimator.ofFloat(mHaloButton, View.ALPHA, 0f)
                     .setDuration(FLIP_DURATION),
-                     mScrollView, View.INVISIBLE));
+                     mScrollView, View.GONE));
 
         mHoverButtonAnim = start(
             setVisibilityWhenDone(
                 ObjectAnimator.ofFloat(mHoverButton, View.ALPHA, 0f)
                    .setDuration(FLIP_DURATION),
-                    mScrollView, View.INVISIBLE));
+                    mScrollView, View.GONE));
 
         updateNotificationShortcutsVisibility(false);
         updateCarrierAndWifiLabelVisibility(true);
@@ -3658,10 +3700,10 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         }
 	if (mBrightnessControl) {
             brightnessControl(event);
-            if ((mDisabled & StatusBarManager.DISABLE_EXPAND) != 0) {
-                return true;
-            }
-        }
+    }
+    if ((mDisabled & StatusBarManager.DISABLE_EXPAND) != 0) {
+        return true;
+    }
 
 	if (mIsStatusBarBrightNess == 1) {
              mIsBrightNessMode = 0;
@@ -4028,6 +4070,9 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
         // not for you
         if (!notificationIsForCurrentUser(n)) return;
+
+        // just.. no
+        if (mTickerDisabled) return;
 
         // Show the ticker if one is requested. Also don't do this
         // until status bar window is attached to the window manager,
@@ -4960,17 +5005,6 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             mCurrUiThemeMode = uiThemeMode;
             recreateStatusBar(false);
             if (mCustomRecent == 1) rebuildRecentsScreen();
-            return;
-        }
-
-        // detect density change
-        int density = res.getConfiguration().densityDpi;
-        if (density != mCurrentDensity) {
-            mCurrentDensity = density;
-            recreateStatusBar(true);
-            recreatePie(isPieEnabled());
-            setTakenSpace();
-            updateOrientation();
             return;
         }
 

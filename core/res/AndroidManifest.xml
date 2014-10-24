@@ -1586,6 +1586,13 @@
         android:label="@string/permlab_getPackageSize"
         android:description="@string/permdesc_getPackageSize" />
 
+    <!-- Allows an application to change the package signature as seen by applications -->
+    <permission android:name="android.permission.FAKE_PACKAGE_SIGNATURE"
+                android:permissionGroup="android.permission-group.SYSTEM_TOOLS"
+                android:protectionLevel="dangerous"
+                android:label="@string/permlab_fakePackageSignature"
+                android:description="@string/permdesc_fakePackageSignature" />
+
     <!-- @deprecated No longer useful, see
          {@link android.content.pm.PackageManager#addPackageToPreferred}
          for details. -->
@@ -1930,7 +1937,7 @@
     <permission android:name="android.permission.SET_ACTIVITY_WATCHER"
         android:label="@string/permlab_runSetActivityWatcher"
         android:description="@string/permdesc_runSetActivityWatcher"
-        android:protectionLevel="signature" />
+        android:protectionLevel="signature|system" />
 
     <!-- Allows an application to call the activity manager shutdown() API
          to put the higher-level system there into a shutdown state.

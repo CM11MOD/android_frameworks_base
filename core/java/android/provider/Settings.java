@@ -58,6 +58,7 @@ import android.util.Log;
 import com.android.internal.widget.ILockSettings;
 
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
@@ -723,7 +724,7 @@ public final class Settings {
      */
     @SdkConstant(SdkConstantType.ACTIVITY_INTENT_ACTION)
     public static final String ACTION_NOTIFICATION_LISTENER_SETTINGS
-            = "android.settings.NOTIFICATION_LISTENER_SETTINGS";
+            = "android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS";
 
     /**
      * Activity Action: Show settings for video captioning.
@@ -1258,32 +1259,6 @@ public final class Settings {
         }
 
         /**
-         * @hide
-         * Convenience function for retrieving a single system settings value
-         * as a boolean.  Note that internally setting values are always
-         * stored as strings; this function converts the string to a boolean
-         * for you. It will only return true if the stored value is "1"
-         *
-         * @param cr The ContentResolver to access.
-         * @param name The name of the setting to retrieve.
-         * @param def Value to return if the setting is not defined.
-         *
-         * @return The setting's current value, or 'def' if it is not defined
-         * or not a valid integer.
-         */
-        public static boolean getBoolean(ContentResolver cr, String name, boolean def) {
-            String v = getString(cr, name);
-            try {
-                if(v != null)
-                    return "1".equals(v);
-                else
-                    return def;
-            } catch (NumberFormatException e) {
-                return def;
-            }
-        }
-
-        /**
          * Convenience function for updating a single settings value as an
          * integer. This will either create a new entry in the table if the
          * given name does not exist, or modify the value of the existing row
@@ -1308,20 +1283,98 @@ public final class Settings {
 
         /**
          * @hide
+         * Convenience function for retrieving a single system settings value
+         * as a boolean. Note that internally setting values are always
+         * stored as strings; this function converts the string to a boolean
+         * for you. It will only return true if the stored value is "1"
+         *
+         * @param cr The ContentResolver to access.
+         * @param name The name of the setting to retrieve.
+         * @param def Value to return if the setting is not defined.
+         *
+         * @return The setting's current value, or 'def' if it is not defined
+         * or not a valid integer.
+         */
+        public static boolean getBoolean(ContentResolver cr, String name, boolean def) {
+            return getBooleanForUser(cr, name, def, UserHandle.myUserId());
+        }
+
+        /** @hide */
+        public static boolean getBooleanForUser(ContentResolver cr, String name, boolean def,
+                                                int userHandle) {
+            String v = getStringForUser(cr, name, userHandle);
+            try {
+                if(v != null)
+                    return "1".equals(v);
+                else
+                    return def;
+            } catch (NumberFormatException e) {
+                return def;
+            }
+        }
+
+        /**
+         * @hide
          * Convenience function for updating a single settings value as a
          * boolean. This will either create a new entry in the table if the
          * given name does not exist, or modify the value of the existing row
-         * with that name.  Note that internally setting values are always
+         * with that name. Note that internally setting values are always
          * stored as strings, so this function converts the given value to a
          * string (1 or 0) before storing it.
-         * 
+         *
          * @param cr The ContentResolver to access.
          * @param name The name of the setting to modify.
          * @param value The new value for the setting.
          * @return true if the value was set, false on database errors
          */
         public static boolean putBoolean(ContentResolver cr, String name, boolean value) {
-            return putString(cr, name, value ? "1" : "0");
+            return putBooleanForUser(cr, name, value, UserHandle.myUserId());
+        }
+
+        /** @hide */
+        public static boolean putBooleanForUser(ContentResolver cr, String name, boolean value,
+                                                int userHandle) {
+            return putStringForUser(cr, name, value ? "1" : "0", userHandle);
+        }
+
+        /**
+         * @hide
+         * Methods to handle storing and retrieving arraylists
+         *
+         * @param cr The ContentResolver to access.
+         * @param name The name of the setting to modify.
+         * @param value The new value for the setting.
+         * @return true if the value was set, false on database errors
+         */
+        public static boolean putArrayList(ContentResolver cr, String name, ArrayList<String> list) {
+            return putArrayListForUser(cr, name, list, UserHandle.myUserId());
+        }
+
+        public static boolean putArrayListForUser(ContentResolver cr, String name, ArrayList<String> list, int userHandle) {
+            if (list != null && list.size() > 0) {
+                String joined = TextUtils.join("|",list);
+                return putStringForUser(cr, name, joined, userHandle);
+            } else {
+                return putStringForUser(cr, name, "", userHandle);
+            }
+        }
+
+        public static ArrayList<String> getArrayList(ContentResolver cr, String name) {
+            return getArrayListForUser(cr, name,  UserHandle.myUserId());
+        }
+
+        public static ArrayList<String> getArrayListForUser(ContentResolver cr, String name, int userHandle) {
+            String v = getStringForUser(cr, name, userHandle);
+            ArrayList<String> list = new ArrayList<String>();
+            if (v != null) {
+                if (!v.isEmpty()){
+                    String[] split = v.split("\\|");
+                    for (String i : split) {
+                        list.add(i);
+                    }
+                }
+            }
+            return list;
         }
 
         /**
@@ -2110,10 +2163,19 @@ public final class Settings {
         public static final String VOLUME_BLUETOOTH_SCO = "volume_bluetooth_sco";
 
         /**
-         * Whether to prevent loud volume levels when headset is first plugged in.
+         * Whether to display a warning dialog when the user attempts to increase media
+         * volume above a safe limit while a headset is connected. This feature is enabled
+         * by default to comply with safety regulations and the user must agree to a waiver
+         * if they wish to disable it.
          * @hide
          */
         public static final String SAFE_HEADSET_VOLUME = "safe_headset_volume";
+
+        /**
+         * Whether to reduce media volume to a safe limit each time a headset is plugged in.
+         * @hide
+         */
+        public static final String SAFE_HEADSET_VOLUME_RESTORE = "safe_headset_volume_restore";
 
         /**
          * Master volume (float in the range 0.0f to 1.0f).
@@ -2458,6 +2520,15 @@ public final class Settings {
          */
         public static final String HIDE_ROTATION_LOCK_TOGGLE_FOR_ACCESSIBILITY =
                 "hide_rotation_lock_toggle_for_accessibility";
+
+        /**
+         * Call recording format value
+         * 0: AMR_WB
+         * 1: MPEG_4
+         * Default: 0
+         * @hide
+         */
+        public static final String CALL_RECORDING_FORMAT = "call_recording_format";
 
         /**
          * Whether the phone vibrates when it is ringing due to an incoming call. This will
@@ -4949,6 +5020,7 @@ public final class Settings {
         public static final String PIE_NOTIFICATIONS = "pie_notifications";
 
         // PIE COLORS EVERYWHERE! //
+
         /**
          * @hide
          */
@@ -6058,6 +6130,18 @@ public final class Settings {
         public static final String WEATHER_TILE_ICON = "weather_tile_icon";
 
         /**
+         * Heads Up background color
+         * @hide
+         */
+        public static final String HEADS_UP_BG_COLOR = "heads_up_bg_color";
+
+        /**
+         * Heads Up text color
+         * @hide
+         */
+        public static final String HEADS_UP_TEXT_COLOR = "heads_up_text_color";
+
+        /**
          * Sensitivity of all system shake events
          * @hide
          */
@@ -6292,6 +6376,20 @@ public final class Settings {
         public static final String SETTINGS_ROOT_LIST_TITLE_TEXT_COLOR = "settings_root_list_title_text_color";
 
         /**
+         * Text color of the settings app root list switch widget for state on
+         * 
+         * @hide
+         */
+        public static final String SETTINGS_ROOT_LIST_SWITCH_ON_TEXT_COLOR = "settings_root_list_switch_on_text_color";
+
+        /**
+         * Text color of the settings app root list switch widget for state off
+         * 
+         * @hide
+         */
+        public static final String SETTINGS_ROOT_LIST_SWITCH_OFF_TEXT_COLOR = "settings_root_list_switch_off_text_color";
+
+        /**
          * Status bar opaque color
          * @hide
          */
@@ -6355,6 +6453,86 @@ public final class Settings {
         public static final String TOUCH_WAKE = "touch_wake";
 
         /**
+         * Whether lid wakes the device
+         * @hide
+         */
+        public static final String LOCKSCREEN_LID_WAKE = "lockscreen_lid_wake";
+
+        /**
+         * Whether lid puts the device to sleep
+         * @hide
+         */
+        public static final String LOCKSCREEN_LID_SLEEP = "lockscreen_lid_sleep";
+
+        /**
+         * Whether the smart cover is activated or not
+         * @hide
+         */
+        public static final String SMART_COVER_ACTIVATED = "smart_cover_activated";
+
+        /**
+         * This preference enables showing the power menu on LockScreen.
+         * @hide
+         */
+        public static final String LOCKSCREEN_ENABLE_POWER_MENU = "lockscreen_enable_power_menu";
+
+        /**
+         * Force expanded notifications on all apps that support it.
+         * @hide
+         */
+        public static final String FORCE_EXPANDED_NOTIFICATIONS = "force_expanded_notifications";
+
+        /**
+         * Whether wifi settings will connect to access point automatically
+         * 0 = automatically
+         * 1 = manually
+         * @hide
+         */
+        public static final String WIFI_AUTO_CONNECT_TYPE = "wifi_auto_connect_type";
+
+        /**
+         * Whether wifi settings will connect to access point automatically when
+         * network from mobile network transform to Wifi network
+         * 0 = automatically
+         * 1 = manually
+         * 2 = always ask
+         *
+         * @hide
+         */
+        public static final String DATA_TO_WIFI_CONNECT_TYPE = "data_to_wifi_connect_type";
+
+        /**
+         * Whether to disable forced navigation bar during immersive mode and keyboard is showing
+         *
+         * @hide
+         */
+        public static final String DISABLE_FORCED_NAVBAR = "disable_forced_navbar";
+
+        /**
+         * Whether to disable navbar or statusbar system gesture when in immersive mode
+         * 0 - both enabled (default)
+         * 1 - disable navbar gesture
+         * 2 - disable statusbar gesture
+         * @hide
+         */
+        public static final String DISABLE_SYSTEM_GESTURES = "disable_system_gestures";
+
+        /**
+        　* Optionally hide the status bar alarm icon
+         * 0: default, shown
+         * 1: hidden
+        　* @hide
+         */
+        public static final String STATUS_BAR_HIDE_ALARM_ICON = "statusbar_hide_alarm_icon";
+
+        /**
+         * Disable the statusbar ticker
+         * Default is enabled
+         * @hide
+         */
+        public static final String TICKER_DISABLED = "ticker_disabled";
+
+         /**
          * Settings to backup. This is here so that it's in the same place as the settings
          * keys and easy to update.
          *
@@ -6804,8 +6982,6 @@ public final class Settings {
             MOVED_TO_GLOBAL.add(Settings.Global.TETHER_DUN_REQUIRED);
             MOVED_TO_GLOBAL.add(Settings.Global.TETHER_SUPPORTED);
             MOVED_TO_GLOBAL.add(Settings.Global.USB_MASS_STORAGE_ENABLED);
-            MOVED_TO_GLOBAL.add(Settings.Global.TETHER_WIFI_NETWORK);
-            MOVED_TO_GLOBAL.add(Settings.Global.TETHER_USB_NETWORK);
             MOVED_TO_GLOBAL.add(Settings.Global.USE_GOOGLE_MAIL);
             MOVED_TO_GLOBAL.add(Settings.Global.WEB_AUTOFILL_QUERY_URL);
             MOVED_TO_GLOBAL.add(Settings.Global.WIFI_COUNTRY_CODE);
@@ -6822,6 +6998,7 @@ public final class Settings {
             MOVED_TO_GLOBAL.add(Settings.Global.WIFI_P2P_DEVICE_NAME);
             MOVED_TO_GLOBAL.add(Settings.Global.WIFI_SAVED_STATE);
             MOVED_TO_GLOBAL.add(Settings.Global.WIFI_SUPPLICANT_SCAN_INTERVAL_MS);
+            MOVED_TO_GLOBAL.add(Settings.Global.WIFI_SUPPLICANT_SCAN_INTERVAL_WFD_CONNECTED_MS);
             MOVED_TO_GLOBAL.add(Settings.Global.WIFI_SUSPEND_OPTIMIZATIONS_ENABLED);
             MOVED_TO_GLOBAL.add(Settings.Global.WIFI_WATCHDOG_ON);
             MOVED_TO_GLOBAL.add(Settings.Global.WIFI_WATCHDOG_POOR_NETWORK_TEST_ENABLED);
@@ -8662,6 +8839,15 @@ public final class Settings {
         public static final String PROTECTED_COMPONENTS = "protected_components";
 
         /**
+         * The global recents long press activity chosen by the user.
+         * This setting is stored as a flattened component name as
+         * per {@link ComponentName#flattenToString()}.
+         *
+         * @hide
+         */
+        public static final String RECENTS_LONG_PRESS_ACTIVITY = "recents_long_press_activity";
+
+        /**
          * This are the settings to be backed up.
          *
          * NOTE: Settings are backed up and restored in the order they appear
@@ -9463,20 +9649,6 @@ public final class Settings {
        public static final String TETHER_DUN_APN = "tether_dun_apn";
 
        /**
-        * Used to let the device specify a specific network for WiFI Tethering.
-        * Defaults to empty (use system default networks).
-        * @hide
-        */
-       public static final String TETHER_WIFI_NETWORK = "tether_wifi_network";
-
-       /**
-        * Used to let the device specify a specific network for USB Tethering.
-        * Defaults to empty (use system default networks).
-        * @hide
-        */
-       public static final String TETHER_USB_NETWORK = "tether_usb_network";
-
-       /**
         * USB Mass Storage Enabled
         */
        public static final String USB_MASS_STORAGE_ENABLED = "usb_mass_storage_enabled";
@@ -9615,6 +9787,13 @@ public final class Settings {
         */
        public static final String WIFI_SCAN_INTERVAL_WHEN_P2P_CONNECTED_MS =
                "wifi_scan_interval_p2p_connected_ms";
+
+       /**
+        * The intervel in milliseconds to scan at supplicant when wfd session
+        * @hide
+        */
+       public static final String WIFI_SUPPLICANT_SCAN_INTERVAL_WFD_CONNECTED_MS =
+                 "wifi_scan_intervel_wfd_connected_ms";
 
        /**
         * Whether the Wi-Fi watchdog is enabled.
@@ -10431,6 +10610,13 @@ public final class Settings {
          * @hide
          */
         public static final String LOW_BATTERY_SOUND_TIMEOUT = "low_battery_sound_timeout";
+
+        /**
+         * Enable the QuickBoot feature
+         *
+         * @hide
+         */
+        public static final String ENABLE_QUICKBOOT = "enable_quickboot";
 
         /**
          * Settings to backup. This is here so that it's in the same place as the settings

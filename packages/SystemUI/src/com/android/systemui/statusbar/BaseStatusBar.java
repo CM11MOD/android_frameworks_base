@@ -223,6 +223,7 @@ public abstract class BaseStatusBar extends SystemUI implements
     private int mHeadsUpSnoozeTime = DEFAULT_TIME_HEADS_UP_SNOOZE;
     private long mHeadsUpSnoozeStartTime;
     protected boolean mShowHeadsUpUpdates;
+    private int mHeadsUpTextColor;
 
     protected IDreamManager mDreamManager;
     PowerManager mPowerManager;
@@ -865,13 +866,6 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
     }
 
-    protected void recreatePie(boolean enabled) {
-        if (enabled) {
-            mPieController.constructSlices();
-            mPieController.refreshContainer();
-        }
-    }
-
     public void setOverwriteImeIsActive(boolean enabled) {
         if (mEdgeGestureManager != null) {
             mEdgeGestureManager.setOverwriteImeIsActive(enabled);
@@ -998,6 +992,12 @@ public abstract class BaseStatusBar extends SystemUI implements
     }
 
     private void launchFloating(PendingIntent pIntent, boolean allowed) {
+        if (pIntent == null) {
+            String text = mContext.getResources().getString(R.string.status_bar_floating_no_interface);
+            int duration = Toast.LENGTH_SHORT;
+            Toast.makeText(mContext, text, duration).show();
+            return;
+        }
         Intent overlay = new Intent();
         if (allowed) overlay.addFlags(Intent.FLAG_FLOATING_WINDOW | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         try {
@@ -1492,7 +1492,8 @@ public abstract class BaseStatusBar extends SystemUI implements
     protected void onShowSearchPanel() {
     }
 
-    public boolean inflateViews(NotificationData.Entry entry, ViewGroup parent) {
+    public boolean inflateViews(NotificationData.Entry entry,
+            ViewGroup parent, int customTextColor) {
         int minHeight =
                 mContext.getResources().getDimensionPixelSize(R.dimen.default_notification_min_height);
         int maxHeight =
@@ -1500,8 +1501,17 @@ public abstract class BaseStatusBar extends SystemUI implements
         StatusBarNotification sbn = entry.notification;
         RemoteViews contentView = sbn.getNotification().contentView;
         RemoteViews bigContentView = sbn.getNotification().bigContentView;
+        mHeadsUpTextColor = customTextColor;
         if (contentView == null) {
             return false;
+        }
+
+        // apply custom text color to heads up notifications ONLY
+        if (mHeadsUpTextColor != 0) { // if it's 0, then text color is default
+            if (mHeadsUpTextColor != -1) { //if it's -1, then it's a regular notification
+                setHeadsUpTextColor(contentView, mHeadsUpTextColor);
+                setHeadsUpTextColor(bigContentView, mHeadsUpTextColor);
+            }
         }
 
         // create the row view
@@ -1583,11 +1593,23 @@ public abstract class BaseStatusBar extends SystemUI implements
         return true;
     }
 
+    private void setHeadsUpTextColor(RemoteViews view, int color) {
+        if (view != null) {
+            view.setInt(com.android.internal.R.id.title, "setTextColor", color);
+            view.setInt(com.android.internal.R.id.text, "setTextColor", color);
+            view.setInt(com.android.internal.R.id.big_text, "setTextColor", color);
+            view.setInt(com.android.internal.R.id.time, "setTextColor", color);
+//            view.setInt(com.android.internal.R.id.action0, "setTextColor", color);
+            view.setInt(com.android.internal.R.id.text2, "setTextColor", color);
+            view.setInt(com.android.internal.R.id.info, "setTextColor", color);
+        }
+    }
+
     public NotificationClicker makeClicker(PendingIntent intent, String pkg, String tag, int id) {
         return new NotificationClicker(intent, pkg, tag, id);
     }
 
-    public class NotificationClicker implements View.OnClickListener {
+    public class NotificationClicker implements View.OnClickListener, View.OnLongClickListener {
         private KeyguardTouchDelegate mKeyguard;
         public PendingIntent mPendingIntent;
         private Intent mIntent;
@@ -1615,6 +1637,12 @@ public abstract class BaseStatusBar extends SystemUI implements
 
         public void makeFloating(boolean floating) {
             mFloat = floating;
+        }
+
+        @Override
+        public boolean onLongClick(View v) {
+            onClick(v);
+            return true;
         }
 
         public void onClick(View v) {
@@ -1767,7 +1795,7 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
 
         // Construct the expanded view.
-        if (!inflateViews(entry, mPile)) {
+        if (!inflateViews(entry, mPile, 0)) {
             handleNotificationError(key, notification, "Couldn't expand RemoteViews for: "
                     + notification);
             return null;
@@ -2093,12 +2121,16 @@ public abstract class BaseStatusBar extends SystemUI implements
         if (contentIntent != null) {
             final View.OnClickListener listener =
                    mNotificationHelper.getNotificationClickListener(entry, headsUp);
+            final View.OnLongClickListener longClickListener =
+                    mNotificationHelper.getNotificationClickListener(entry, false);
             entry.content.setOnClickListener(listener);
+            entry.content.setOnLongClickListener(longClickListener);
             entry.floatingIntent = makeClicker(contentIntent,
                     notification.getPackageName(), notification.getTag(), notification.getId());
             entry.floatingIntent.makeFloating(true);
         } else {
             entry.content.setOnClickListener(null);
+            entry.content.setOnLongClickListener(null);
             entry.floatingIntent = null;
         }
         // Update the roundIcon
@@ -2705,12 +2737,16 @@ public abstract class BaseStatusBar extends SystemUI implements
         pieRemove();
         if (mPieEnabled) {
             pieAdd();
-            if (mPieGravity == 3) {
-                Settings.System.putIntForUser(resolver,
-                        Settings.System.NAVIGATION_BAR_SHOW, 0, UserHandle.USER_CURRENT);
-            } else {
-                Settings.System.putIntForUser(resolver,
-                        Settings.System.NAVIGATION_BAR_SHOW, 1, UserHandle.USER_CURRENT);
+            int showByDefault = mContext.getResources().getBoolean(
+                    com.android.internal.R.bool.config_showNavigationBar) ? 1 : 0;
+            if (showByDefault == 1) {
+                if (mPieGravity == 3) {
+                    Settings.System.putIntForUser(resolver,
+                            Settings.System.NAVIGATION_BAR_SHOW, 0, UserHandle.USER_CURRENT);
+                } else {
+                    Settings.System.putIntForUser(resolver,
+                            Settings.System.NAVIGATION_BAR_SHOW, 1, UserHandle.USER_CURRENT);
+                }
             }
         }
     }

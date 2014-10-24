@@ -54,6 +54,7 @@ import android.app.IActivityManager;
 import android.app.StatusBarManager;
 import android.app.admin.DevicePolicyManager;
 import android.animation.ValueAnimator;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -90,11 +91,11 @@ import android.os.StrictMode;
 import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.Trace;
+import android.os.UserHandle;
 import android.os.WorkSource;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.util.EventLog;
-import android.util.FloatMath;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.Pair;
@@ -5455,10 +5456,23 @@ public class WindowManagerService extends IWindowManager.Stub
             mInputMonitor.setEventDispatchingLw(mEventDispatchingEnabled);
         }
 
+        // start QuickBoot to check if need restore from exception
+        if (SystemProperties.getBoolean("persist.sys.quickboot_ongoing", false))
+            checkQuickBootException();
+
         mPolicy.enableScreenAfterBoot();
 
         // Make sure the last requested orientation has been applied.
         updateRotationUnchecked(false, false);
+    }
+
+    private void checkQuickBootException() {
+        Intent intent = new Intent("org.codeaurora.action.QUICKBOOT");
+        intent.putExtra("mode", 2);
+        try {
+            mContext.startActivityAsUser(intent,UserHandle.CURRENT);
+        } catch (ActivityNotFoundException e) {
+        }
     }
 
     public void showBootMessage(final CharSequence msg, final boolean always) {
@@ -5577,8 +5591,8 @@ public class WindowManagerService extends IWindowManager.Stub
      * of the target image.
      *
      * @param displayId the Display to take a screenshot of.
-     * @param width the width of the target bitmap
-     * @param height the height of the target bitmap
+     * @param width the width of the target bitmap or -1 for a full screenshot
+     * @param height the height of the target bitmap or -1 for a full screenshot
      * @param force565 if true the returned bitmap will be RGB_565, otherwise it
      *                 will be the same config as the surface
      */
@@ -5729,6 +5743,12 @@ public class WindowManagerService extends IWindowManager.Stub
                 int fw = frame.width();
                 int fh = frame.height();
 
+                // use the whole frame if width and height are not constrained
+                if (width == -1 && height == -1) {
+                    width = frame.width();
+                    height = frame.height();
+                }
+
                 // Constrain thumbnail to smaller of screen width or height. Assumes aspect
                 // of thumbnail is the same as the screen (in landscape) or square.
                 scale = Math.max(width / (float) fw, height / (float) fh);
@@ -5789,7 +5809,7 @@ public class WindowManagerService extends IWindowManager.Stub
         Matrix matrix = new Matrix();
         ScreenRotationAnimation.createRotationMatrix(rot, dw, dh, matrix);
         // TODO: Test for RTL vs. LTR and use frame.right-width instead of -frame.left
-        matrix.postTranslate(-FloatMath.ceil(frame.left), -FloatMath.ceil(frame.top));
+        matrix.postTranslate((float) -Math.ceil(frame.left), (float) -Math.ceil(frame.top));
         Canvas canvas = new Canvas(bm);
         canvas.drawColor(0xFF000000);
         canvas.drawBitmap(rawss, matrix, null);
@@ -11196,10 +11216,6 @@ public class WindowManagerService extends IWindowManager.Stub
     @Override
     public int getSystemUIVisibility() {
         return mLastStatusBarVisibility;
-    }
-
-    public void updateStatusBarNavBarHeight() {
-        mPolicy.updateStatusBarNavBarHeight();
     }
 
 }
