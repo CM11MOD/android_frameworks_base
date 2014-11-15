@@ -81,6 +81,7 @@ import org.xmlpull.v1.XmlSerializer;
 import android.app.ActivityManager;
 import android.app.ActivityManagerNative;
 import android.app.AppGlobals;
+import android.app.AppOpsManager;
 import android.app.IActivityManager;
 import android.app.admin.IDevicePolicyManager;
 import android.app.backup.IBackupManager;
@@ -467,6 +468,8 @@ public class PackageManagerService extends IPackageManager.Stub {
     ComponentName mResolveComponentName;
     PackageParser.Package mPlatformPackage;
     ComponentName mCustomResolverComponentName;
+
+    private AppOpsManager mAppOps;
 
     boolean mResolverReplaced = false;
 
@@ -1050,6 +1053,18 @@ public class PackageManagerService extends IPackageManager.Stub {
                                 deleteOld = true;
                             }
 
+                            if (!update && !isSystemApp(res.pkg.applicationInfo)) {
+                                boolean privacyGuard = android.provider.Settings.Secure.getIntForUser(
+                                        mContext.getContentResolver(),
+                                        android.provider.Settings.Secure.PRIVACY_GUARD_DEFAULT,
+                                        0, UserHandle.USER_CURRENT) == 1;
+                                if (privacyGuard) {
+                                    mAppOps.setPrivacyGuardSettingForPackage(
+                                            res.pkg.applicationInfo.uid,
+                                            res.pkg.applicationInfo.packageName, true, false);
+                                }
+                            }
+
                             // Log current value of "unknown sources" setting
                             EventLog.writeEvent(EventLogTags.UNKNOWN_SOURCES_ENABLED,
                                 getUnknownSourcesSettings());
@@ -1293,6 +1308,8 @@ public class PackageManagerService extends IPackageManager.Stub {
                 ApplicationInfo.FLAG_SYSTEM|ApplicationInfo.FLAG_PRIVILEGED);
         mSettings.addSharedUserLPw("android.uid.shell", SHELL_UID,
                 ApplicationInfo.FLAG_SYSTEM|ApplicationInfo.FLAG_PRIVILEGED);
+
+        mAppOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
 
         String separateProcesses = SystemProperties.get("debug.separate_processes");
         if (separateProcesses != null && separateProcesses.length() > 0) {
@@ -1756,6 +1773,21 @@ public class PackageManagerService extends IPackageManager.Stub {
                     deleteCodeCacheDirsLI(pkgName);
                 }
                 mSettings.mFingerprint = Build.FINGERPRINT;
+            }
+
+            // Disable components marked for disabling at build-time
+            for (String name : mContext.getResources().getStringArray(
+                    com.android.internal.R.array.config_disabledComponents)) {
+                ComponentName cn = ComponentName.unflattenFromString(name);
+                Slog.v(TAG, "Disabling " + name);
+                String className = cn.getClassName();
+                PackageSetting pkgSetting = mSettings.mPackages.get(cn.getPackageName());
+                if (pkgSetting == null || pkgSetting.pkg == null
+                        || !pkgSetting.pkg.hasComponentClassName(className)) {
+                    Slog.w(TAG, "Unable to disable " + name);
+                    continue;
+                }
+                pkgSetting.disableComponentLPw(className, UserHandle.USER_OWNER);
             }
 
             // All the changes are done during package scanning.
