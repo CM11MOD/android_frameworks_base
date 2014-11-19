@@ -330,6 +330,9 @@
          note that empty fields can be ommitted: "name,apn,,,,,,,,,310,260,,DUN" -->
     <string translatable="false" name="config_tether_apndata"></string>
 
+    <!-- Boolean indicating whether Softap requires reloading AP firmware -->
+    <bool name="config_wifiApFirmwareReload">true</bool>
+
     <!-- Boolean indicating whether the wifi chipset has dual frequency band support -->
     <bool translatable="false" name="config_wifi_dual_band_support">false</bool>
 
@@ -1822,6 +1825,12 @@
 
     <bool name="config_networkSamplingWakesDevice">true</bool>
 
+    <!-- Path to the library that contains a device specific key handler -->
+    <string name="config_deviceKeyHandlerLib" translatable="false"></string>
+
+    <!-- Name of that key handler class -->
+    <string name="config_deviceKeyHandlerClass" translatable="false"></string>
+
     <string-array translatable="false" name="config_cdma_home_system" />
 
     <!--From SmsMessage-->
@@ -1845,6 +1854,9 @@
     </string-array>
 
     <bool name="config_auto_attach_data_on_creation">true</bool>
+
+    <!-- True if the gesture service should be started at system start -->
+    <bool name="config_enableGestureService">false</bool>
 
     <!-- Values for GPS configuration -->
     <string-array translatable="false" name="config_gpsParameters">
