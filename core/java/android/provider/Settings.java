@@ -2062,6 +2062,19 @@ public final class Settings {
         public static final int VOLUME_OVERLAY_NONE = 3;
 
         /**
+         * Whether the proximity sensor will adjust call to speaker
+         * @hide
+         */
+        public static final String PROXIMITY_AUTO_SPEAKER = "proximity_auto_speaker";
+
+        /**
+         * Whether the proximity sensor will adjust call to speaker,
+         * only while in call (not while ringing on outgoing call)
+         * @hide
+         */
+        public static final String PROXIMITY_AUTO_SPEAKER_INCALL_ONLY = "proximity_auto_speaker_incall_only";
+
+        /**
          * Whether the torch will pulse on incoming call
          * @hide
          */
@@ -2800,6 +2813,16 @@ public final class Settings {
          */
         @Deprecated
         public static final String DOCK_SOUNDS_ENABLED = Global.DOCK_SOUNDS_ENABLED;
+
+        /**
+         * Displays a notification when wifi network has changed
+         * 0 - default (off)
+         * 1 - toast
+         * 2 - notification
+         * 3 - notification with sound
+         * @hide
+         */
+        public static final String WIFI_NETWORK_NOTIFICATIONS = "wifi_network_notifications";
 
         /**
          * Whether to play sounds when the keyguard is shown and dismissed.
@@ -4808,6 +4831,12 @@ public final class Settings {
          * String.
          */
         public static final String CUSTOM_CARRIER_LABEL = "custom_carrier_label";
+
+        /**
+         * Hides carrier label in keyguard
+         * @hide
+         */
+        public static final String NO_CARRIER_LABEL = "no_carrier_label";
 
         /**
          * Color of the carrier and wifi network name in the notification drawer

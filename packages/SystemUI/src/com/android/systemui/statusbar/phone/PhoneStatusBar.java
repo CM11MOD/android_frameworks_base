@@ -2330,7 +2330,10 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                 lp.gravity = mHeadsUpGravityBottom && !mImeIsShowing ? Gravity.BOTTOM : Gravity.TOP;
                 lp.y = mHeadsUpGravityBottom && !mImeIsShowing
                         ? getBottomGap() : (mStatusBarShows ? getStatusBarHeight() : 0);
-                mWindowManager.updateViewLayout(mHeadsUpNotificationView, lp);
+                try {
+                    mWindowManager.updateViewLayout(mHeadsUpNotificationView, lp);
+                } catch (Exception e) {
+                }
             }
         }
     }
@@ -2365,7 +2368,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             }
 
             if (CLOSE_PANEL_WHEN_EMPTIED && mNotificationData.size() == 0
-                    && !mNotificationPanel.isTracking()) {
+                    && !mNotificationPanel.isTracking() && !isShowingSettings()) {
                 animateCollapsePanels();
             }
         }

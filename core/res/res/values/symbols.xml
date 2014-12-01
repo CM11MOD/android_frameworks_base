@@ -862,6 +862,7 @@
   <java-symbol type="string" name="config_chooseAccountActivity" />
   <java-symbol type="string" name="config_chooseTypeAndAccountActivity" />
   <java-symbol type="string" name="config_customResolverActivity" />
+  <java-symbol type="string" name="config_prelaunchcheckactivity" />
   <java-symbol type="string" name="config_appsAuthorizedForSharedAccounts" />
   <java-symbol type="string" name="error_message_title" />
   <java-symbol type="string" name="action_bar_home_description_format" />
@@ -1473,7 +1474,6 @@
   <java-symbol type="array" name="config_tether_upstream_types" />
   <java-symbol type="array" name="config_tether_usb_regexs" />
   <java-symbol type="array" name="config_tether_wifi_regexs" />
-  <java-symbol type="array" name="config_tether_p2p_regexs" />
   <java-symbol type="array" name="config_usbHostBlacklist" />
   <java-symbol type="array" name="config_serialPorts" />
   <java-symbol type="array" name="radioAttributes" />
@@ -1969,7 +1969,8 @@
   <java-symbol type="string" name="adb_active_generic_notification_message" />
 
   <!-- External media format -->
-  <java-symbol type="string" name="extmedia_format_message_cm" />
+  <java-symbol type="string" name="usb_extmedia_format_message" />
+  <java-symbol type="string" name="sd_extmedia_format_message" />
 
   <java-symbol type="integer" name="config_LTE_antenna_bar_quantity_metric" />
   <java-symbol type="integer" name="config_LTE_RSRP_threshold_type" />
@@ -1979,6 +1980,8 @@
 
   <!-- Proximity check timeout -->
   <java-symbol type="integer" name="config_proximityCheckTimeout" />
+
+  <java-symbol type="array" name="config_ignored_sms_packages" />
 
   <!-- USB OTG Notification -->
   <java-symbol type="string" name="usb_storage_notification_manage_message" />
@@ -2026,4 +2029,22 @@
 
   <!-- for wifi auto connection -->
   <java-symbol type="bool" name="wifi_autocon" />
+
+  <!-- Strings for ExternalStorageFormatter service (SD card). -->
+  <java-symbol type="string" name="sd_progress_unmounting" />
+  <java-symbol type="string" name="sd_progress_erasing" />
+  <java-symbol type="string" name="sd_format_error" />
+  <java-symbol type="string" name="sd_media_bad_removal" />
+  <java-symbol type="string" name="sd_media_checking" />
+  <java-symbol type="string" name="sd_media_removed" />
+  <java-symbol type="string" name="sd_media_shared" />
+
+  <!-- Strings for ExternalStorageFormatter service (USB storage). -->
+  <java-symbol type="string" name="usb_progress_unmounting" />
+  <java-symbol type="string" name="usb_progress_erasing" />
+  <java-symbol type="string" name="usb_format_error" />
+  <java-symbol type="string" name="usb_media_bad_removal" />
+  <java-symbol type="string" name="usb_media_checking" />
+  <java-symbol type="string" name="usb_media_removed" />
+  <java-symbol type="string" name="usb_media_shared" />
 </resources>

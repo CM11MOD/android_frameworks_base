@@ -1044,6 +1044,8 @@ public abstract class BaseStatusBar extends SystemUI implements
                             .findItem(R.id.notification_inspect_item_force_stop).setVisible(false);
                     mNotificationBlamePopup.getMenu()
                             .findItem(R.id.notification_inspect_item_wipe_app).setVisible(false);
+                    mNotificationBlamePopup.getMenu()
+                            .findItem(R.id.notification_inspect_item_uninstall).setVisible(false);
                 } else {
                     try {
                         PackageManager pm = (PackageManager) mContext.getPackageManager();
@@ -1056,6 +1058,8 @@ public abstract class BaseStatusBar extends SystemUI implements
                               || mDpm.packageHasActiveAdmins(packageNameF)) {
                             mNotificationBlamePopup.getMenu()
                             .findItem(R.id.notification_inspect_item_wipe_app).setEnabled(false);
+                            mNotificationBlamePopup.getMenu()
+                            .findItem(R.id.notification_inspect_item_uninstall).setEnabled(false);
                         }
                     } catch (NameNotFoundException ex) {
                         Slog.e(TAG, "Failed looking up ApplicationInfo for " + packageNameF, ex);
@@ -1123,6 +1127,13 @@ public abstract class BaseStatusBar extends SystemUI implements
                             values.put(PackageTable.PACKAGE_NAME, packageNameF);
                             mContext.getContentResolver().insert(SPAM_MESSAGE_URI, values);
                             removeNotification(entry.key);
+                        } else if (item.getItemId() == R.id.notification_inspect_item_uninstall) {
+                            Uri packageURI = Uri.parse("package:"+packageNameF);
+                            Intent uninstallIntent = new Intent(Intent.ACTION_UNINSTALL_PACKAGE, packageURI);
+                            uninstallIntent.putExtra(Intent.EXTRA_UNINSTALL_ALL_USERS, true);
+                            uninstallIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            mContext.startActivity(uninstallIntent);
+                            animateCollapsePanels(CommandQueue.FLAG_EXCLUDE_NONE);
                         } else {
                             return false;
                         }
@@ -2121,12 +2132,14 @@ public abstract class BaseStatusBar extends SystemUI implements
         if (contentIntent != null) {
             final View.OnClickListener listener =
                    mNotificationHelper.getNotificationClickListener(entry, headsUp);
-            final View.OnLongClickListener longClickListener =
-                    mNotificationHelper.getNotificationClickListener(entry, false);
             entry.content.setOnClickListener(listener);
-            entry.content.setOnLongClickListener(longClickListener);
+            if (headsUp) {
+                final View.OnLongClickListener longClickListener =
+                        mNotificationHelper.getNotificationClickListener(entry, false);
+                entry.content.setOnLongClickListener(longClickListener);
+            }
             entry.floatingIntent = makeClicker(contentIntent,
-                    notification.getPackageName(), notification.getTag(), notification.getId());
+            notification.getPackageName(), notification.getTag(), notification.getId());
             entry.floatingIntent.makeFloating(true);
         } else {
             entry.content.setOnClickListener(null);
@@ -2198,6 +2211,7 @@ public abstract class BaseStatusBar extends SystemUI implements
                 || notification.vibrate != null;
         boolean isHighPriority = sbn.getScore() >= INTERRUPTION_THRESHOLD;
         boolean isFullscreen = notification.fullScreenIntent != null;
+        boolean hasTicker = !TextUtils.isEmpty(notification.tickerText);
         int asHeadsUp = notification.extras.getInt(Notification.EXTRA_AS_HEADS_UP,
                 Notification.HEADS_UP_NEVER);
         boolean isAllowed = asHeadsUp != Notification.HEADS_UP_NEVER;
@@ -2215,33 +2229,30 @@ public abstract class BaseStatusBar extends SystemUI implements
 
         boolean isIMEShowing = inputMethodManager.isImeShowing();
 
-        // Possibly a heads up from an app with native support.
-        boolean interrupt = (isFullscreen || (isHighPriority && isNoisy) || isRequested)
-                && isAllowed
-                && mPowerManager.isScreenOn()
-                && (keyguardNotVisible || keyguardVisibleNotSecure);
-
-        // Possibly a heads up package set from the user.
-        interrupt = interrupt
-                || (!isOngoing
-                && mPowerManager.isScreenOn()
-                && (keyguardNotVisible || keyguardVisibleNotSecure));
-
+        boolean isDreamShowing = false;
         try {
-            interrupt = interrupt && !mDreamManager.isDreaming();
+            isDreamShowing = mDreamManager.isDreaming();
         } catch (RemoteException e) {
             Log.d(TAG, "failed to query dream manager", e);
         }
 
-        // its below our threshold priority, we might want to always display
-        // notifications from certain apps
-        if (!isHighPriority && keyguardNotVisible && !isOngoing && !isRequested) {
-            // However, we don't want to interrupt if we're in an application that is
-            // in Do Not Disturb
-            if (!isPackageInDnd(getTopLevelPackage())) {
-                return true;
-            }
-        }
+        // Possibly a heads up from an app with native support.
+        boolean interrupt = (isFullscreen || isHighPriority || isNoisy || hasTicker || isRequested)
+                && isAllowed
+                && mPowerManager.isScreenOn()
+                && !isDreamShowing
+                && !isIMEShowing
+                && (keyguardNotVisible || keyguardVisibleNotSecure)
+                && !isPackageInDnd(getTopLevelPackage());
+
+        // Possibly a heads up package set from the user.
+        interrupt = interrupt
+                || (!isOngoing
+                && (keyguardNotVisible || keyguardVisibleNotSecure))
+                && mPowerManager.isScreenOn()
+                && !isDreamShowing
+                && !isIMEShowing
+                && !isPackageInDnd(getTopLevelPackage());
 
         if (DEBUG) Log.d(TAG, "interrupt: " + interrupt);
         return interrupt;
